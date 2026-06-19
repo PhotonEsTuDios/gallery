@@ -6,7 +6,8 @@ interface Album {
   latest: string
 }
 
-const { data: albums, pending } = await useFetch<Album[]>('/api/albums')
+// lazy = Seite öffnet sofort, Liste lädt im Hintergrund (Navigation bleibt frei)
+const { data: albums, pending } = useFetch<Album[]>('/api/albums', { lazy: true })
 </script>
 
 <template>

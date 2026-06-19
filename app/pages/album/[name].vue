@@ -14,7 +14,8 @@ interface AlbumData {
 
 const route = useRoute()
 const name = computed(() => route.params.name as string)
-const { data: album, pending, error } = await useFetch<AlbumData>(() => `/api/album/${name.value}`)
+// lazy = blockiert die Navigation NICHT (Zurück geht auch während des Ladens)
+const { data: album, pending, error } = useFetch<AlbumData>(() => `/api/album/${name.value}`, { lazy: true })
 
 // Lightbox
 const openIndex = ref<number | null>(null)
