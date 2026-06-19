@@ -57,18 +57,18 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
     <p v-if="pending" class="text-sm text-neutral-500">Lade…</p>
     <p v-else-if="error" class="text-sm text-red-400">Album nicht gefunden.</p>
 
-    <div v-else class="columns-2 gap-3 sm:columns-3 lg:columns-4 [&>*]:mb-3">
+    <div v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
       <button
         v-for="(p, i) in album?.photos"
         :key="p.sha"
-        class="block w-full overflow-hidden rounded-lg border border-line"
+        class="group relative aspect-square overflow-hidden rounded-lg border border-line bg-ink-soft"
         @click="open(i)"
       >
         <img
           :src="`/img/${p.sha}?w=400`"
           :alt="p.filename"
           loading="lazy"
-          class="w-full transition duration-300 hover:opacity-90"
+          class="h-full w-full object-cover transition duration-300 group-hover:opacity-90"
         />
       </button>
     </div>
