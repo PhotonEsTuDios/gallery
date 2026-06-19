@@ -1,5 +1,7 @@
 import { chromium } from 'playwright'
 
+const PW = process.env.GALLERY_PASSWORD
+if (!PW) { console.error('GALLERY_PASSWORD fehlt — mit: set -a; . ./.env; set +a; node scripts/peek-live.mjs'); process.exit(1) }
 const OUT = '/private/tmp/claude-501/-Users-potstupimi/d63148d1-fec0-4f87-84c4-40ecf95876cb/scratchpad'
 const BASE = 'https://gallery.photonestudios.com'
 const b = await chromium.launch()
@@ -13,7 +15,7 @@ await page.goto(BASE + '/', { waitUntil: 'networkidle' })
 console.log('Nach / -> URL:', page.url())
 
 // Login
-await page.fill('input[type=password]', 'Aschenbroedel4')
+await page.fill('input[type=password]', PW)
 await page.screenshot({ path: `${OUT}/live-login.png` })
 await page.click('button[type=submit]')
 await page.waitForURL(BASE + '/', { timeout: 15000 }).catch(() => {})

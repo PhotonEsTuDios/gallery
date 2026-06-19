@@ -1,12 +1,14 @@
 import { chromium } from 'playwright'
 
+const PW = process.env.GALLERY_PASSWORD
+if (!PW) { console.error('GALLERY_PASSWORD fehlt — mit: set -a; . ./.env; set +a; node scripts/peek.mjs'); process.exit(1) }
 const OUT = '/private/tmp/claude-501/-Users-potstupimi/d63148d1-fec0-4f87-84c4-40ecf95876cb/scratchpad'
 const b = await chromium.launch()
 const page = await b.newPage({ viewport: { width: 1440, height: 900 } })
 
 // Login
 await page.goto('http://localhost:3000/', { waitUntil: 'networkidle' })
-await page.fill('input[type=password]', 'Aschenbroedel4')
+await page.fill('input[type=password]', PW)
 await page.click('button[type=submit]')
 await page.waitForURL('http://localhost:3000/')
 await page.waitForSelector('a[href^="/album/"]')
