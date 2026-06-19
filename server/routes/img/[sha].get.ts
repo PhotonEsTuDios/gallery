@@ -59,11 +59,17 @@ export default defineEventHandler(async (event) => {
   const meta = await originalMeta(region, cfg.photosTable, sha)
   const orig = await client.send(new GetObjectCommand({ Bucket: bucket, Key: meta.key }))
   const origBuf = await streamToBuffer(orig.Body)
-  const thumb = await sharp(origBuf)
-    .rotate() // EXIF-Orientierung respektieren
-    .resize({ width: w, withoutEnlargement: true })
-    .webp({ quality: 80 })
-    .toBuffer()
+  let thumb: Buffer
+  try {
+    thumb = await sharp(origBuf)
+      .rotate() // EXIF-Orientierung respektieren
+      .resize({ width: w, withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .toBuffer()
+  } catch {
+    // nicht rendertbares Format (z.B. RAW) -> sauber 415 statt 500
+    throw createError({ statusCode: 415, statusMessage: 'Format nicht renderbar' })
+  }
 
   // write-through in den S3-Cache (Fehler hier dürfen das Ausliefern nicht killen)
   try {

@@ -18,7 +18,9 @@
     "vue": "latest"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.0",
     "@tailwindcss/vite": "^4.3.1",
+    "playwright": "^1.61.0",
     "tailwindcss": "^4.3.1"
   }
 }

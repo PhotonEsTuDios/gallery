@@ -33,6 +33,14 @@ function albumOf(sourcePath: string | undefined, dateIso: string | undefined): s
 // Ordner, die keine echten Fotos sind und nicht in der Galerie auftauchen.
 const HIDDEN_ALBUMS = new Set(['Claude-Workspace'])
 
+// Nur Formate, die der Thumbnail-Proxy (sharp) rendern kann.
+// (RAW .nef und Videos .mov/.mp4 fliegen raus -> keine kaputten Kacheln.)
+const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif'])
+function isImage(key: string): boolean {
+  const ext = key.toLowerCase().split('.').pop() || ''
+  return IMAGE_EXTS.has(ext)
+}
+
 // Jahr aus dem Albumnamen ziehen ("2019-Jungle Book" -> 2019), für die Sortierung.
 function albumYear(name: string): number {
   const m = name.match(/(19|20)\d{2}/)
@@ -62,6 +70,8 @@ export async function getAllPhotos(region: string, table: string): Promise<Photo
     for (const it of res.Items ?? []) {
       // interne Steuer-Items überspringen (z.B. __dropbox_cursor__, __writetest__)
       if (!it.s3_key || String(it.sha256).startsWith('__')) continue
+      // Videos / RAW raus – nur thumbnail-bare Bilder
+      if (!isImage(it.s3_key)) continue
       photos.push({
         sha: it.sha256,
         s3_key: it.s3_key,
