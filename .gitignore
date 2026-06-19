@@ -9,6 +9,8 @@ node_modules
 .env
 .env.*
 !.env.example
+.deploy.env
+function.zip
 
 # Logs / OS
 *.log

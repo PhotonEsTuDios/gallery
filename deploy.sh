@@ -47,7 +47,9 @@ aws lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$AWS
 aws lambda update-function-configuration \
   --function-name "$FUNCTION_NAME" \
   --region "$AWS_REGION" --no-cli-pager \
-  --environment "Variables={GALLERY_PASSWORD=$GALLERY_PASSWORD,SESSION_SECRET=$SESSION_SECRET,AWS_REGION=$AWS_REGION,PHOTOS_BUCKET=${PHOTOS_BUCKET:-photonestudios-photos},PHOTOS_TABLE=${PHOTOS_TABLE:-photonestudios-photos}}" >/dev/null
+  --environment "Variables={GALLERY_PASSWORD=$GALLERY_PASSWORD,SESSION_SECRET=$SESSION_SECRET,PHOTOS_BUCKET=${PHOTOS_BUCKET:-photonestudios-photos},PHOTOS_TABLE=${PHOTOS_TABLE:-photonestudios-photos}}" >/dev/null
+# Hinweis: AWS_REGION ist ein reservierter Lambda-Env-Name und wird NICHT gesetzt –
+# die Runtime liefert die Region selbst (eu-west-1).
 
 echo "▸ 5/5  CloudFront-Cache leeren…"
 if [ -n "${DISTRIBUTION_ID:-}" ]; then

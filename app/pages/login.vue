@@ -7,7 +7,7 @@ async function submit() {
   error.value = ''
   loading.value = true
   try {
-    await $fetch('/api/login', { method: 'POST', body: { password: password.value } })
+    await postSigned('/api/login', { password: password.value })
     await navigateTo('/')
   } catch {
     error.value = 'Falsches Passwort.'

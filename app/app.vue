@@ -4,7 +4,7 @@ const showChrome = computed(() => route.path !== '/login')
 
 const authed = useState('authed', () => false)
 async function logout() {
-  await $fetch('/api/logout', { method: 'POST' })
+  await postSigned('/api/logout')
   authed.value = false
   await navigateTo('/login')
 }
