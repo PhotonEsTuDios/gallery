@@ -1,0 +1,24 @@
+{
+  "name": "photon-gallery",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "preview": "node .output/server/index.mjs",
+    "postinstall": "nuxt prepare",
+    "deploy": "./deploy.sh"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1072.0",
+    "@aws-sdk/client-s3": "^3.1072.0",
+    "@aws-sdk/lib-dynamodb": "^3.1072.0",
+    "nuxt": "^4.4.8",
+    "sharp": "^0.35.1",
+    "vue": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.1",
+    "tailwindcss": "^4.3.1"
+  }
+}
