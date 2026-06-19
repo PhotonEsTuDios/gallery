@@ -27,6 +27,15 @@ function albumFromPath(sourcePath: string | undefined): string {
   return parts[parts.length - 2]
 }
 
+// Ordner, die keine echten Shootings sind und nicht in der Galerie auftauchen.
+const HIDDEN_ALBUMS = new Set(['Claude-Workspace', 'Kamera-Uploads', 'Sonstige'])
+
+// Jahr aus dem Albumnamen ziehen ("2019-Jungle Book" -> 2019), für die Sortierung.
+function albumYear(name: string): number {
+  const m = name.match(/(19|20)\d{2}/)
+  return m ? Number(m[0]) : 0
+}
+
 // Lambda-/Node-Prozess hält den Scan 5 Minuten im RAM.
 const TTL_MS = 5 * 60 * 1000
 let cache: { at: number; photos: Photo[] } | null = null
@@ -77,6 +86,7 @@ export async function getAlbums(region: string, table: string): Promise<Album[]>
   }
   const albums: Album[] = []
   for (const [name, arr] of map) {
+    if (HIDDEN_ALBUMS.has(name)) continue
     arr.sort((a, b) => (a.uploaded_at < b.uploaded_at ? 1 : -1))
     albums.push({
       name,
@@ -85,7 +95,8 @@ export async function getAlbums(region: string, table: string): Promise<Album[]>
       latest: arr[0].uploaded_at,
     })
   }
-  albums.sort((a, b) => (a.latest < b.latest ? 1 : -1))
+  // chronologisch: jüngstes Jahr zuerst; bei gleichem/keinem Jahr nach Upload-Datum
+  albums.sort((a, b) => albumYear(b.name) - albumYear(a.name) || (a.latest < b.latest ? 1 : -1))
   return albums
 }
 
