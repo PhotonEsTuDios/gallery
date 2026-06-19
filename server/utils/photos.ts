@@ -18,17 +18,20 @@ export interface Album {
   latest: string // jüngstes uploaded_at
 }
 
-// Album = der unmittelbare Ordner, in dem das Bild liegt.
-// "/Kamera-Uploads/Julie 2014/foo.jpg" -> "Julie 2014"
-function albumFromPath(sourcePath: string | undefined): string {
-  if (!sourcePath) return 'Sonstige'
-  const parts = sourcePath.split('/').filter(Boolean)
-  if (parts.length < 2) return 'Sonstige'
-  return parts[parts.length - 2]
+// Album bestimmen:
+//  - liegt das Bild in einem benannten Unterordner -> dieser Ordner ("Julie 2014")
+//  - lose Handy-Uploads (direkt in "Kamera-Uploads") oder ohne Ordner
+//    -> nach Jahr gruppiert ("Schnappschüsse 2014"), sonst landet alles in einem Klumpen
+function albumOf(sourcePath: string | undefined, dateIso: string | undefined): string {
+  const parts = (sourcePath || '').split('/').filter(Boolean)
+  const parent = parts.length >= 2 ? parts[parts.length - 2] : ''
+  if (parent && parent !== 'Kamera-Uploads') return parent
+  const year = (dateIso || '').slice(0, 4)
+  return year ? `Schnappschüsse ${year}` : 'Sonstige'
 }
 
-// Ordner, die keine echten Shootings sind und nicht in der Galerie auftauchen.
-const HIDDEN_ALBUMS = new Set(['Claude-Workspace', 'Kamera-Uploads', 'Sonstige'])
+// Ordner, die keine echten Fotos sind und nicht in der Galerie auftauchen.
+const HIDDEN_ALBUMS = new Set(['Claude-Workspace'])
 
 // Jahr aus dem Albumnamen ziehen ("2019-Jungle Book" -> 2019), für die Sortierung.
 function albumYear(name: string): number {
@@ -63,7 +66,7 @@ export async function getAllPhotos(region: string, table: string): Promise<Photo
         sha: it.sha256,
         s3_key: it.s3_key,
         filename: it.original_filename ?? it.s3_key,
-        album: albumFromPath(it.source_path),
+        album: albumOf(it.source_path, it.uploaded_at),
         bytes: Number(it.bytes ?? 0),
         uploaded_at: it.uploaded_at ?? '',
         taken_at: it.taken_at ?? null,
