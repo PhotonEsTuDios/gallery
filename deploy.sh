@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # Deploy der PhotonEsTuDios-Gallery nach AWS Lambda + CloudFront.
 #
-# Voraussetzung (einmalig von Rainer eingerichtet, siehe infra/RAINER-gallery-setup.md):
-#   - Lambda-Funktion  photon-gallery  (Node 22, arm64, Function URL)
-#   - CloudFront-Distribution für gallery.photonestudios.com
-#   - Deploy-Policy am IAM-User daniela-haering
+# Einmalig von Rainer eingerichtet (siehe infra/RAINER-gallery-setup.md):
+#   Lambda photon-gallery (Node 22, arm64) hinter CloudFront OAC + AWS_IAM,
+#   Deploy-Rechte am IAM-User daniela-haering.
 #
-# Konfiguration: lege eine .deploy.env an (gitignored) mit:
+# .deploy.env (gitignored) liefert:
 #   FUNCTION_NAME=photon-gallery
-#   DISTRIBUTION_ID=E........
+#   DISTRIBUTION_ID=E6NIDGDE02P23
 #   AWS_PROFILE=photon
 #   AWS_REGION=eu-west-1
 set -euo pipefail
@@ -19,46 +18,66 @@ cd "$(dirname "$0")"
 set -a; . ./.deploy.env; . ./.env; set +a
 
 : "${FUNCTION_NAME:?FUNCTION_NAME fehlt in .deploy.env}"
+: "${DISTRIBUTION_ID:?DISTRIBUTION_ID fehlt in .deploy.env}"
 : "${AWS_REGION:=eu-west-1}"
-LAMBDA_ARCH="${LAMBDA_ARCH:-arm64}"   # muss zur Lambda-Architektur passen
+# Versionen müssen zu sharp in package.json passen:
+SHARP_VERSION="${SHARP_VERSION:-0.35.1}"
+LIBVIPS_VERSION="${LIBVIPS_VERSION:-1.3.0}"
 
-echo "▸ 1/5  Build (Nitro aws-lambda)…"
+echo "▸ 1/6  Build (Nitro aws-lambda, serveStatic)…"
 NITRO_PRESET=aws-lambda npm run build
 
-echo "▸ 2/5  sharp-Binary für linux-${LAMBDA_ARCH} einsetzen…"
-# Nitro hält native Module extern -> wir tauschen das Binary auf die Lambda-Plattform.
-( cd .output/server \
-  && npm install --no-save --no-package-lock \
-       --os=linux --cpu="${LAMBDA_ARCH}" sharp@0.35.1 >/dev/null 2>&1 \
-  || echo "  ! sharp-Reinstall übersprungen – Thumbnails in Prod prüfen!" )
+echo "▸ 2/6  sharp-Binary für linux-arm64 einsetzen…"
+# Nitro bündelt nur das Host-Binary (darwin). Wir holen das Lambda-Binary (linux-arm64)
+# in einem sauberen Temp-Ordner per Namen (--force umgeht die os/cpu-Prüfung) und
+# kopieren es ins Bundle. Direktes npm-install in .output/server scheitert an
+# fremden Postinstall-Skripten – daher der Temp-Umweg.
+TMP=$(mktemp -d)
+( cd "$TMP" && npm init -y >/dev/null 2>&1 && \
+  npm install --no-save --ignore-scripts --force \
+    "@img/sharp-linux-arm64@${SHARP_VERSION}" \
+    "@img/sharp-libvips-linux-arm64@${LIBVIPS_VERSION}" >/dev/null 2>&1 )
+mkdir -p .output/server/node_modules/@img
+copied=0
+for d in "$TMP"/node_modules/@img/*linux-arm64*; do
+  [ -d "$d" ] && cp -R "$d" .output/server/node_modules/@img/ && copied=$((copied + 1))
+done
+rm -rf "$TMP"
+[ "$copied" -ge 1 ] || { echo "  ✗ sharp linux-arm64 nicht gefunden – Abbruch"; exit 1; }
+echo "  ✓ $copied linux-arm64 Pakete eingesetzt"
 
-echo "▸ 3/5  Zippen…"
+echo "▸ 3/6  Zippen (server/ + public/ als Geschwister)…"
+# Der Handler liest Assets via ../public relativ zu server/ -> beide müssen ins Zip,
+# und der Lambda-Handler zeigt auf server/index.handler (siehe Schritt 4).
 rm -f function.zip
-( cd .output/server && zip -qr ../../function.zip . )
+( cd .output && zip -qr ../function.zip server public )
+echo "  ✓ $(du -h function.zip | cut -f1)"
 
-echo "▸ 4/5  Lambda-Code + Konfiguration aktualisieren…"
-aws lambda update-function-code \
-  --function-name "$FUNCTION_NAME" \
-  --zip-file fileb://function.zip \
-  --region "$AWS_REGION" --no-cli-pager >/dev/null
-
-aws lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$AWS_REGION"
-
+echo "▸ 4/6  Lambda-Konfiguration (Handler + Env)…"
 aws lambda update-function-configuration \
-  --function-name "$FUNCTION_NAME" \
-  --region "$AWS_REGION" --no-cli-pager \
+  --function-name "$FUNCTION_NAME" --region "$AWS_REGION" --no-cli-pager \
+  --handler "server/index.handler" \
   --environment "Variables={GALLERY_PASSWORD=$GALLERY_PASSWORD,SESSION_SECRET=$SESSION_SECRET,PHOTOS_BUCKET=${PHOTOS_BUCKET:-photonestudios-photos},PHOTOS_TABLE=${PHOTOS_TABLE:-photonestudios-photos}}" >/dev/null
-# Hinweis: AWS_REGION ist ein reservierter Lambda-Env-Name und wird NICHT gesetzt –
-# die Runtime liefert die Region selbst (eu-west-1).
+# Hinweis: AWS_REGION ist reserviert und wird NICHT gesetzt (Runtime liefert sie).
 
-echo "▸ 5/5  CloudFront-Cache leeren…"
-if [ -n "${DISTRIBUTION_ID:-}" ]; then
-  aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" \
-    --paths "/*" --region "$AWS_REGION" --no-cli-pager >/dev/null \
-    && echo "  ✓ Invalidation gestartet"
-else
-  echo "  ! DISTRIBUTION_ID fehlt – Cache nicht geleert (TTL abwarten)."
-fi
+echo "▸ 5/6  Code hochladen…"
+# Kein 'lambda wait' (braucht GetFunctionConfiguration, nicht in der Deploy-Policy).
+# Stattdessen Retry, bis das Config-Update aus Schritt 4 durch ist.
+for i in $(seq 1 12); do
+  if aws lambda update-function-code \
+       --function-name "$FUNCTION_NAME" --region "$AWS_REGION" --no-cli-pager \
+       --zip-file fileb://function.zip >/dev/null 2>/tmp/photon_lambda_err; then
+    echo "  ✓ Code aktualisiert"; break
+  fi
+  if grep -qiE "conflict|in progress|cannot be performed" /tmp/photon_lambda_err; then
+    echo "  [$i] vorheriges Update läuft noch, warte 5s…"; sleep 5; continue
+  fi
+  echo "  ✗ Fehler:"; cat /tmp/photon_lambda_err; exit 1
+done
+
+echo "▸ 6/6  CloudFront-Cache leeren…"
+aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" \
+  --paths "/*" --no-cli-pager >/dev/null && echo "  ✓ Invalidation gestartet"
 
 rm -f function.zip
 echo "✅ Deploy fertig → https://gallery.photonestudios.com"

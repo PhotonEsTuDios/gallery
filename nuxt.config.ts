@@ -12,8 +12,11 @@ export default defineNuxtConfig({
   },
 
   // Prod-Build als AWS-Lambda (Function URL). Lokal: node-server.
+  // serveStatic: das Lambda liefert die /_nuxt-Assets selbst aus (einziger Origin
+  // hinter CloudFront OAC -> kein separater S3-Origin nötig).
   nitro: {
     preset: process.env.NITRO_PRESET || 'node-server',
+    serveStatic: true,
   },
 
   // Server-only Secrets — landen NIE im Client-Bundle.
