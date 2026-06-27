@@ -119,3 +119,67 @@ export async function getAlbumPhotos(region: string, table: string, album: strin
     .filter((p) => p.album === album)
     .sort((a, b) => (a.filename < b.filename ? -1 : 1))
 }
+
+// ---- Timeline (nach Monat) -------------------------------------------------
+// Datum = uploaded_at (taken_at ist aktuell leer; kommt mit dem EXIF-Ausbau).
+export interface TimelineMonth {
+  ym: string // "2026-06"  bzw. "0000-00" für Fotos ohne Datum
+  label: string // "Juni 2026"
+  count: number
+  cover: string // sha des Titelbilds (jüngstes des Monats)
+}
+
+const MONTHS_DE = [
+  'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
+  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
+]
+
+function ymOf(p: Photo): string {
+  return (p.uploaded_at || '').slice(0, 7) || '0000-00'
+}
+
+function labelOf(ym: string): string {
+  if (ym === '0000-00') return 'Ohne Datum'
+  const [y, m] = ym.split('-')
+  return `${MONTHS_DE[Number(m) - 1] ?? m} ${y}`
+}
+
+// Innerhalb eines Monats: jüngstes zuerst (uploaded_at desc), dann Dateiname.
+function byNewest(a: Photo, b: Photo): number {
+  if (a.uploaded_at !== b.uploaded_at) return a.uploaded_at < b.uploaded_at ? 1 : -1
+  return a.filename < b.filename ? -1 : 1
+}
+
+export async function getTimelineIndex(region: string, table: string): Promise<TimelineMonth[]> {
+  const photos = await getAllPhotos(region, table)
+  const map = new Map<string, Photo[]>()
+  for (const p of photos) {
+    const ym = ymOf(p)
+    const arr = map.get(ym)
+    if (arr) arr.push(p)
+    else map.set(ym, [p])
+  }
+  const months: TimelineMonth[] = []
+  for (const [ym, arr] of map) {
+    arr.sort(byNewest)
+    months.push({ ym, label: labelOf(ym), count: arr.length, cover: arr[0].sha })
+  }
+  // neueste Monate zuerst; "Ohne Datum" (0000-00) landet damit ganz unten
+  months.sort((a, b) => (a.ym < b.ym ? 1 : a.ym > b.ym ? -1 : 0))
+  return months
+}
+
+export interface TimelinePhoto {
+  sha: string
+  filename: string
+  bytes: number
+  uploaded_at: string
+}
+
+export async function getTimelineMonth(region: string, table: string, ym: string): Promise<TimelinePhoto[]> {
+  const photos = await getAllPhotos(region, table)
+  return photos
+    .filter((p) => ymOf(p) === ym)
+    .sort(byNewest)
+    .map((p) => ({ sha: p.sha, filename: p.filename, bytes: p.bytes, uploaded_at: p.uploaded_at }))
+}

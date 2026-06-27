@@ -17,33 +17,11 @@ const name = computed(() => route.params.name as string)
 // lazy = blockiert die Navigation NICHT (Zurück geht auch während des Ladens)
 const { data: album, pending, error } = useFetch<AlbumData>(() => `/api/album/${name.value}`, { lazy: true })
 
-// Lightbox
+// Lightbox (Komponente PhotoLightbox steuert Tasten/Navigation)
 const openIndex = ref<number | null>(null)
-const current = computed(() => (openIndex.value === null ? null : album.value?.photos[openIndex.value] ?? null))
-
 function open(i: number) {
   openIndex.value = i
 }
-function close() {
-  openIndex.value = null
-}
-function next() {
-  if (openIndex.value === null || !album.value) return
-  openIndex.value = (openIndex.value + 1) % album.value.photos.length
-}
-function prev() {
-  if (openIndex.value === null || !album.value) return
-  openIndex.value = (openIndex.value - 1 + album.value.photos.length) % album.value.photos.length
-}
-
-function onKey(e: KeyboardEvent) {
-  if (openIndex.value === null) return
-  if (e.key === 'Escape') close()
-  else if (e.key === 'ArrowRight') next()
-  else if (e.key === 'ArrowLeft') prev()
-}
-onMounted(() => window.addEventListener('keydown', onKey))
-onUnmounted(() => window.removeEventListener('keydown', onKey))
 </script>
 
 <template>
@@ -73,30 +51,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
       </button>
     </div>
 
-    <!-- Lightbox -->
-    <Teleport to="body">
-      <div
-        v-if="current"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/95"
-        @click.self="close"
-      >
-        <button class="absolute left-4 top-1/2 -translate-y-1/2 p-3 text-2xl text-neutral-400 hover:text-white" @click="prev">‹</button>
-        <button class="absolute right-4 top-1/2 -translate-y-1/2 p-3 text-2xl text-neutral-400 hover:text-white" @click="next">›</button>
-        <button class="absolute right-4 top-4 p-2 text-sm text-neutral-400 hover:text-white" @click="close">✕</button>
-
-        <img
-          :src="`/img/${current.sha}?w=1600`"
-          :alt="current.filename"
-          class="max-h-[88vh] max-w-[92vw] object-contain"
-        />
-
-        <a
-          :href="`/img/${current.sha}?dl=1`"
-          class="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full border border-line bg-ink/80 px-4 py-2 text-xs text-neutral-200 backdrop-blur transition hover:border-neutral-500"
-        >
-          ↓ Original herunterladen
-        </a>
-      </div>
-    </Teleport>
+    <PhotoLightbox v-if="album" :photos="album.photos" v-model:index="openIndex" />
   </div>
 </template>
