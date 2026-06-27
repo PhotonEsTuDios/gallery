@@ -36,6 +36,13 @@ async function logout() {
           >
             Timeline
           </NuxtLink>
+          <NuxtLink
+            to="/labels"
+            class="transition hover:text-neutral-200"
+            :class="route.path === '/labels' ? 'text-neutral-200' : 'text-neutral-500'"
+          >
+            Labels
+          </NuxtLink>
         </nav>
       </div>
       <button

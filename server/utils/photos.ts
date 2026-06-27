@@ -9,6 +9,10 @@ export interface Photo {
   bytes: number
   uploaded_at: string
   taken_at: string | null
+  // Auto-Label-Felder (optional, vom labeler.py gesetzt)
+  quality_score?: number
+  blurry?: boolean
+  colors?: string[]
 }
 
 export interface Album {
@@ -62,7 +66,8 @@ export async function getAllPhotos(region: string, table: string): Promise<Photo
     const res = await doc.send(
       new ScanCommand({
         TableName: table,
-        ProjectionExpression: 'sha256, s3_key, original_filename, source_path, #b, uploaded_at, taken_at',
+        ProjectionExpression:
+          'sha256, s3_key, original_filename, source_path, #b, uploaded_at, taken_at, quality_score, blurry, dominant_colors',
         ExpressionAttributeNames: { '#b': 'bytes' },
         ExclusiveStartKey,
       }),
@@ -80,6 +85,9 @@ export async function getAllPhotos(region: string, table: string): Promise<Photo
         bytes: Number(it.bytes ?? 0),
         uploaded_at: it.uploaded_at ?? '',
         taken_at: it.taken_at ?? null,
+        quality_score: it.quality_score != null ? Number(it.quality_score) : undefined,
+        blurry: it.blurry === true,
+        colors: Array.isArray(it.dominant_colors) ? it.dominant_colors : undefined,
       })
     }
     ExclusiveStartKey = res.LastEvaluatedKey
@@ -182,4 +190,64 @@ export async function getTimelineMonth(region: string, table: string, ym: string
     .filter((p) => ymOf(p) === ym)
     .sort(byNewest)
     .map((p) => ({ sha: p.sha, filename: p.filename, bytes: p.bytes, uploaded_at: p.uploaded_at }))
+}
+
+// ---- Labels (Auto-Labeling) ------------------------------------------------
+// Ordnet einen Hex-Farbwert einer groben Farbfamilie zu (fürs "nach Farbe"-Filtern).
+export function colorFamily(hex?: string): string {
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return 'Neutral'
+  const r = parseInt(hex.slice(1, 3), 16) / 255
+  const g = parseInt(hex.slice(3, 5), 16) / 255
+  const b = parseInt(hex.slice(5, 7), 16) / 255
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min
+  const v = max
+  const s = max === 0 ? 0 : d / max
+  let h = 0
+  if (d !== 0) {
+    if (max === r) h = 60 * (((g - b) / d) % 6)
+    else if (max === g) h = 60 * ((b - r) / d + 2)
+    else h = 60 * ((r - g) / d + 4)
+  }
+  if (h < 0) h += 360
+
+  if (v < 0.16) return 'Schwarz'
+  if (s < 0.15 && v > 0.82) return 'Weiß'
+  if (s < 0.16) return 'Grau'
+  if (h < 15 || h >= 345) return 'Rot'
+  if (h < 45) return v < 0.55 ? 'Braun' : 'Orange'
+  if (h < 70) return 'Gelb'
+  if (h < 165) return 'Grün'
+  if (h < 200) return 'Türkis'
+  if (h < 255) return 'Blau'
+  if (h < 300) return 'Lila'
+  return 'Pink'
+}
+
+export interface LabeledPhoto {
+  sha: string
+  filename: string
+  quality: number
+  blurry: boolean
+  colors: string[]
+  family: string
+}
+
+// Alle bereits gelabelten Fotos (quality_score gesetzt), beste Qualität zuerst.
+// Bei sehr großem Bestand auf MAX begrenzt — fürs Frontend handlich.
+const LABELS_MAX = 4000
+export async function getLabeled(region: string, table: string): Promise<{ count: number; items: LabeledPhoto[] }> {
+  const photos = await getAllPhotos(region, table)
+  const labeled = photos.filter((p) => p.quality_score != null)
+  const items = labeled
+    .map((p) => ({
+      sha: p.sha,
+      filename: p.filename,
+      quality: p.quality_score ?? 0,
+      blurry: !!p.blurry,
+      colors: p.colors ?? [],
+      family: colorFamily((p.colors ?? [])[0]),
+    }))
+    .sort((a, b) => b.quality - a.quality)
+    .slice(0, LABELS_MAX)
+  return { count: labeled.length, items }
 }
