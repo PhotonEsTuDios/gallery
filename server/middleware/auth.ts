@@ -5,7 +5,10 @@ const OPEN = ['/api/login', '/api/logout', '/api/me']
 
 export default defineEventHandler((event) => {
   const path = event.path || ''
-  const guarded = path.startsWith('/img/') || (path.startsWith('/api/') && !OPEN.some((o) => path.startsWith(o)))
+  const guarded =
+    path.startsWith('/img/') ||
+    path.startsWith('/poster/') ||
+    (path.startsWith('/api/') && !OPEN.some((o) => path.startsWith(o)))
   if (!guarded) return
 
   const cfg = useRuntimeConfig(event)

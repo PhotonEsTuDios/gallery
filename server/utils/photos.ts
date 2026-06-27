@@ -9,10 +9,13 @@ export interface Photo {
   bytes: number
   uploaded_at: string
   taken_at: string | null
+  kind: 'photo' | 'video'
   // Auto-Label-Felder (optional, vom labeler.py gesetzt)
   quality_score?: number
   blurry?: boolean
   colors?: string[]
+  gps_lat?: number
+  gps_lon?: number
 }
 
 export interface Album {
@@ -40,9 +43,13 @@ const HIDDEN_ALBUMS = new Set(['Claude-Workspace'])
 // Nur Formate, die der Thumbnail-Proxy (sharp) rendern kann.
 // (RAW .nef und Videos .mov/.mp4 fliegen raus -> keine kaputten Kacheln.)
 const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif'])
-function isImage(key: string): boolean {
+const VIDEO_EXTS = new Set(['mov', 'mp4', 'm4v'])
+// 'photo' = thumbnail-bar, 'video' = abspielbar, null = RAW/sonstiges (nicht darstellbar)
+function mediaKind(key: string): 'photo' | 'video' | null {
   const ext = key.toLowerCase().split('.').pop() || ''
-  return IMAGE_EXTS.has(ext)
+  if (IMAGE_EXTS.has(ext)) return 'photo'
+  if (VIDEO_EXTS.has(ext)) return 'video'
+  return null
 }
 
 // Jahr aus dem Albumnamen ziehen ("2019-Jungle Book" -> 2019), für die Sortierung.
@@ -67,7 +74,7 @@ export async function getAllPhotos(region: string, table: string): Promise<Photo
       new ScanCommand({
         TableName: table,
         ProjectionExpression:
-          'sha256, s3_key, original_filename, source_path, #b, uploaded_at, taken_at, quality_score, blurry, dominant_colors',
+          'sha256, s3_key, original_filename, source_path, #b, uploaded_at, taken_at, quality_score, blurry, dominant_colors, gps_lat, gps_lon',
         ExpressionAttributeNames: { '#b': 'bytes' },
         ExclusiveStartKey,
       }),
@@ -75,8 +82,9 @@ export async function getAllPhotos(region: string, table: string): Promise<Photo
     for (const it of res.Items ?? []) {
       // interne Steuer-Items überspringen (z.B. __dropbox_cursor__, __writetest__)
       if (!it.s3_key || String(it.sha256).startsWith('__')) continue
-      // Videos / RAW raus – nur thumbnail-bare Bilder
-      if (!isImage(it.s3_key)) continue
+      // RAW/Unbekanntes raus; Videos bleiben (per kind markiert)
+      const kind = mediaKind(it.s3_key)
+      if (!kind) continue
       photos.push({
         sha: it.sha256,
         s3_key: it.s3_key,
@@ -85,9 +93,12 @@ export async function getAllPhotos(region: string, table: string): Promise<Photo
         bytes: Number(it.bytes ?? 0),
         uploaded_at: it.uploaded_at ?? '',
         taken_at: it.taken_at ?? null,
+        kind,
         quality_score: it.quality_score != null ? Number(it.quality_score) : undefined,
         blurry: it.blurry === true,
         colors: Array.isArray(it.dominant_colors) ? it.dominant_colors : undefined,
+        gps_lat: it.gps_lat != null ? Number(it.gps_lat) : undefined,
+        gps_lon: it.gps_lon != null ? Number(it.gps_lon) : undefined,
       })
     }
     ExclusiveStartKey = res.LastEvaluatedKey
@@ -112,7 +123,7 @@ export async function getAlbums(region: string, table: string): Promise<Album[]>
     albums.push({
       name,
       count: arr.length,
-      cover: arr[0].sha,
+      cover: (arr.find((p) => p.kind === 'photo') ?? arr[0]).sha,
       latest: arr[0].uploaded_at,
     })
   }
@@ -170,7 +181,7 @@ export async function getTimelineIndex(region: string, table: string): Promise<T
   const months: TimelineMonth[] = []
   for (const [ym, arr] of map) {
     arr.sort(byNewest)
-    months.push({ ym, label: labelOf(ym), count: arr.length, cover: arr[0].sha })
+    months.push({ ym, label: labelOf(ym), count: arr.length, cover: (arr.find((p) => p.kind === 'photo') ?? arr[0]).sha })
   }
   // neueste Monate zuerst; "Ohne Datum" (0000-00) landet damit ganz unten
   months.sort((a, b) => (a.ym < b.ym ? 1 : a.ym > b.ym ? -1 : 0))
@@ -182,6 +193,7 @@ export interface TimelinePhoto {
   filename: string
   bytes: number
   uploaded_at: string
+  kind: 'photo' | 'video'
 }
 
 export async function getTimelineMonth(region: string, table: string, ym: string): Promise<TimelinePhoto[]> {
@@ -189,7 +201,7 @@ export async function getTimelineMonth(region: string, table: string, ym: string
   return photos
     .filter((p) => ymOf(p) === ym)
     .sort(byNewest)
-    .map((p) => ({ sha: p.sha, filename: p.filename, bytes: p.bytes, uploaded_at: p.uploaded_at }))
+    .map((p) => ({ sha: p.sha, filename: p.filename, bytes: p.bytes, uploaded_at: p.uploaded_at, kind: p.kind }))
 }
 
 // ---- Labels (Auto-Labeling) ------------------------------------------------
@@ -250,4 +262,20 @@ export async function getLabeled(region: string, table: string): Promise<{ count
     .sort((a, b) => b.quality - a.quality)
     .slice(0, LABELS_MAX)
   return { count: labeled.length, items }
+}
+
+// ---- Map (nach Ort) --------------------------------------------------------
+export interface MapPin {
+  sha: string
+  filename: string
+  lat: number
+  lon: number
+}
+
+export async function getMapPins(region: string, table: string): Promise<{ count: number; pins: MapPin[] }> {
+  const photos = await getAllPhotos(region, table)
+  const pins = photos
+    .filter((p) => p.gps_lat != null && p.gps_lon != null)
+    .map((p) => ({ sha: p.sha, filename: p.filename, lat: p.gps_lat!, lon: p.gps_lon! }))
+  return { count: pins.length, pins }
 }

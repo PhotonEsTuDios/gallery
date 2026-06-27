@@ -17,6 +17,7 @@ export default defineEventHandler(async (event) => {
       bytes: p.bytes,
       uploaded_at: p.uploaded_at,
       taken_at: p.taken_at,
+      kind: p.kind,
     })),
   }
 })

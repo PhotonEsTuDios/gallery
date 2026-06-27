@@ -43,6 +43,13 @@ async function logout() {
           >
             Labels
           </NuxtLink>
+          <NuxtLink
+            to="/map"
+            class="transition hover:text-neutral-200"
+            :class="route.path === '/map' ? 'text-neutral-200' : 'text-neutral-500'"
+          >
+            Karte
+          </NuxtLink>
         </nav>
       </div>
       <button

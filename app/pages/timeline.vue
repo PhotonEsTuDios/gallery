@@ -10,6 +10,7 @@ interface Photo {
   filename: string
   bytes: number
   uploaded_at: string
+  kind: 'photo' | 'video'
 }
 
 // 1) Leichter Index zuerst — nur Monate + Anzahl (winzig), noch keine Bilder.
@@ -39,6 +40,16 @@ onMounted(() => {
   if (saved === 'S' || saved === 'M' || saved === 'L') density.value = saved
 })
 watch(density, (d) => localStorage.setItem('tl-density', d))
+
+// --- Foto/Video-Filter ---
+type Kind = 'all' | 'photo' | 'video'
+const mediaFilter = ref<Kind>('all')
+function keep(p: Photo) {
+  return mediaFilter.value === 'all' || p.kind === mediaFilter.value
+}
+function shownIn(ym: string): Photo[] {
+  return (loaded[ym] ?? []).filter(keep)
+}
 
 // 3) Höhe je Monatsblock VORAB aus der Anzahl reservieren, damit der
 //    Scrollbalken sofort korrekt ist und nichts springt.
@@ -75,13 +86,13 @@ function setSectionRef(ym: string, el: Element | null) {
 function onIntersect(entries: IntersectionObserverEntry[]) {
   for (const e of entries) {
     const ym = (e.target as HTMLElement).dataset.ym
-    if (!ym) continue
-    if (e.isIntersecting) {
-      renderedMap[ym] = true
-      loadMonth(ym)
-    } else {
-      renderedMap[ym] = false
-    }
+    if (!ym || !e.isIntersecting) continue
+    // Einmal in Sichtnaehe gerendert -> bleibt gerendert (kein Entladen =
+    // kein Rein/Raus-Flackern beim Scrollen). Danach nicht mehr beobachten.
+    renderedMap[ym] = true
+    loadMonth(ym)
+    const el = sectionEls.get(ym)
+    if (el) observer?.unobserve(el)
   }
 }
 
@@ -131,7 +142,7 @@ function scrollToYm(ym: string) {
 // 6) Lightbox über alle bereits geladenen Bilder (in Monatsreihenfolge).
 const openIndex = ref<number | null>(null)
 const allLoaded = computed<Photo[]>(() =>
-  (months.value ?? []).flatMap((m) => loaded[m.ym] ?? []),
+  (months.value ?? []).flatMap((m) => loaded[m.ym] ?? []).filter(keep),
 )
 function open(sha: string) {
   const i = allLoaded.value.findIndex((p) => p.sha === sha)
@@ -146,18 +157,34 @@ function open(sha: string) {
     <!-- Dichte-Umschalter: fix schwebend, immer erreichbar -->
     <div
       v-if="months?.length"
-      class="fixed bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-full border border-line bg-ink/85 p-1 shadow-lg backdrop-blur"
+      class="fixed bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full border border-line bg-ink/85 p-1 shadow-lg backdrop-blur"
     >
-      <button
-        v-for="d in (['S', 'M', 'L'] as const)"
-        :key="d"
-        class="h-7 w-8 rounded-full text-xs transition"
-        :class="density === d ? 'bg-neutral-200 text-black' : 'text-neutral-400 hover:text-neutral-200'"
-        :title="d === 'S' ? 'klein – ganzer Monat auf einen Blick' : d === 'M' ? 'mittel' : 'groß'"
-        @click="density = d"
-      >
-        {{ d }}
-      </button>
+      <!-- Foto/Video-Filter -->
+      <div class="flex items-center gap-1">
+        <button
+          v-for="f in (['all', 'photo', 'video'] as const)"
+          :key="f"
+          class="rounded-full px-2.5 py-1 text-xs transition"
+          :class="mediaFilter === f ? 'bg-neutral-200 text-black' : 'text-neutral-400 hover:text-neutral-200'"
+          @click="mediaFilter = f"
+        >
+          {{ f === 'all' ? 'Alle' : f === 'photo' ? 'Fotos' : 'Videos' }}
+        </button>
+      </div>
+      <span class="h-4 w-px bg-line" />
+      <!-- Dichte -->
+      <div class="flex items-center gap-1">
+        <button
+          v-for="d in (['S', 'M', 'L'] as const)"
+          :key="d"
+          class="h-7 w-8 rounded-full text-xs transition"
+          :class="density === d ? 'bg-neutral-200 text-black' : 'text-neutral-400 hover:text-neutral-200'"
+          :title="d === 'S' ? 'klein – ganzer Monat auf einen Blick' : d === 'M' ? 'mittel' : 'groß'"
+          @click="density = d"
+        >
+          {{ d }}
+        </button>
+      </div>
     </div>
 
     <p v-if="pending" class="text-sm text-neutral-500">Lade…</p>
@@ -169,7 +196,7 @@ function open(sha: string) {
         :key="m.ym"
         :ref="(el) => setSectionRef(m.ym, el as Element | null)"
         :data-ym="m.ym"
-        :style="renderedMap[m.ym] ? undefined : { minHeight: sectionHeight(m) + 'px' }"
+        :style="(renderedMap[m.ym] || mediaFilter !== 'all') ? undefined : { minHeight: sectionHeight(m) + 'px' }"
       >
         <h2
           class="sticky top-[52px] z-10 -mx-5 mb-2 bg-ink/85 px-5 py-2 text-sm font-medium backdrop-blur"
@@ -184,12 +211,14 @@ function open(sha: string) {
           :style="{ display: 'grid', gridTemplateColumns: `repeat(${cols()}, 1fr)`, gap: GAP + 'px' }"
         >
           <button
-            v-for="p in loaded[m.ym]"
+            v-for="p in shownIn(m.ym)"
             :key="p.sha"
             class="group relative aspect-square overflow-hidden rounded-md border border-line bg-ink-soft"
             @click="open(p.sha)"
           >
+            <VideoTile v-if="p.kind === 'video'" :sha="p.sha" :filename="p.filename" />
             <img
+              v-else
               :src="`/img/${p.sha}?w=400`"
               :alt="p.filename"
               loading="lazy"
