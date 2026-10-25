@@ -48,17 +48,27 @@ export default defineEventHandler(async (event) => {
   }
 
   // 1) persistenter S3-Cache
+  // Cache-Miss darf NIE 500 werfen: ohne s3:ListBucket maskiert S3 ein fehlendes
+  // Objekt als 403 statt 404 -> in JEDEM Fehlerfall einfach zur Generierung
+  // durchfallen (ein echter Lese-/Infra-Fehler taucht dann unten klar auf).
   try {
     const cached = await client.send(new GetObjectCommand({ Bucket: bucket, Key: thumbKey }))
     return sendWebp(await streamToBuffer(cached.Body))
-  } catch (e: any) {
-    if (e?.name !== 'NoSuchKey' && e?.$metadata?.httpStatusCode !== 404) throw e
+  } catch {
+    // weiter zur Generierung
   }
 
   // 2) Original holen, resizen, in S3 ablegen
   const meta = await originalMeta(region, cfg.photosTable, sha)
-  const orig = await client.send(new GetObjectCommand({ Bucket: bucket, Key: meta.key }))
-  const origBuf = await streamToBuffer(orig.Body)
+  let origBuf: Buffer
+  try {
+    const orig = await client.send(new GetObjectCommand({ Bucket: bucket, Key: meta.key }))
+    origBuf = await streamToBuffer(orig.Body)
+  } catch (e: any) {
+    // Original liegt nicht vor oder ist nicht lesbar (z.B. fehlendes s3:GetObject-Recht
+    // der Exec-Rolle) -> klar als 502 melden, nicht als generisches 500.
+    throw createError({ statusCode: 502, statusMessage: `Original nicht lesbar (${e?.name || 'Fehler'})` })
+  }
   let thumb: Buffer
   try {
     thumb = await sharp(origBuf)
