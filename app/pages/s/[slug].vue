@@ -58,35 +58,20 @@ const toggleFav = (n: string) => {
   else if (favs.value.length < 5) favs.value.push(n)
 }
 
-// ---- release form
-const GRANTS = [
-  { k: 'website', t: 'The Photon·EsTuDios website and online portfolio' },
-  { k: 'social', t: 'Photon·EsTuDios social media (Instagram, Facebook, LinkedIn and similar)' },
-  { k: 'competitions', t: 'Photography competitions, awards and exhibitions' },
-  { k: 'print', t: 'Printed portfolios, books, magazines and features about Photon·EsTuDios' },
-  { k: 'promotion', t: 'Promoting Photon·EsTuDios services, such as flyers, presentations and ads' },
-  { k: 'future', t: 'Future formats and media not listed here, for showing Photon·EsTuDios work, always with credit to you' },
-  { k: 'privateFrames', t: 'Also frames 02, 09 and 10. Without this tick they stay private, just for you.' },
-] as const
-const form = reactive({
-  name: '', email: '', creditAs: '', note: '', signature: '', confirmed: false, wantsApproval: false,
-  grants: Object.fromEntries(GRANTS.map((g) => [g.k, false])) as Record<string, boolean>,
-})
+// ---- picks: proofs to finish + note (the usage release is signed on the teaser, before access)
+const note = ref('')
 const sent = ref<string | null>(null)
 const formError = ref('')
 const sending = ref(false)
-onMounted(() => { try { sent.value = localStorage.getItem(`share-consent-${slug.value}`) } catch {} })
-function selectAll() { GRANTS.forEach((g) => { if (g.k !== 'privateFrames') form.grants[g.k] = true }) }
-async function submitConsent() {
+onMounted(() => { try { sent.value = localStorage.getItem(`share-picks-${slug.value}`) } catch {} })
+async function submitPicks() {
   formError.value = ''
-  if (!form.name.trim() || !form.signature.trim() || !form.confirmed) {
-    formError.value = 'Please add your name, type your signature and tick the confirmation.'; return
-  }
+  if (!favs.value.length && !note.value.trim()) { formError.value = 'Choose at least one frame or write a note.'; return }
   sending.value = true
   try {
-    const r = await postSigned<{ receivedAt: string }>(`/api/share/${slug.value}/consent`, { ...form, favourites: favs.value })
+    const r = await postSigned<{ receivedAt: string }>(`/api/share/${slug.value}/picks`, { favourites: favs.value, note: note.value })
     sent.value = r.receivedAt
-    try { localStorage.setItem(`share-consent-${slug.value}`, r.receivedAt) } catch {}
+    try { localStorage.setItem(`share-picks-${slug.value}`, r.receivedAt) } catch {}
   } catch { formError.value = 'Sending did not work. Please try again in a moment.' }
   finally { sending.value = false }
 }
@@ -159,7 +144,7 @@ async function submitConsent() {
 
       <section class="block" aria-labelledby="proofs">
         <h2 id="proofs" class="h2"><span class="num">03</span>Proofs <small class="mono">143 frames</small></h2>
-        <p class="small">Tap up to five frames you would like finished as well. They are sent along with the form below. <b>{{ favs.length }} of 5 chosen</b><span v-if="favs.length">: {{ favs.join(', ') }}</span></p>
+        <p class="small">Tap up to five frames you would like finished as well. Send them with the button below. <b>{{ favs.length }} of 5 chosen</b><span v-if="favs.length">: {{ favs.join(', ') }}</span></p>
         <div class="proofs">
           <button v-for="p in data.proofs" :key="p.n" type="button" class="proof" :class="{ on: favs.includes(p.n) }"
                   :aria-pressed="favs.includes(p.n)" :aria-label="`Proof ${p.n}`" @click="toggleFav(p.n)">
@@ -169,29 +154,16 @@ async function submitConsent() {
       </section>
 
       <section class="block rights" aria-labelledby="rights">
-        <h2 id="rights" class="h2"><span class="num">04</span>May I show this work?</h2>
+        <h2 id="rights" class="h2"><span class="num">04</span>Your picks</h2>
         <div v-if="sent" class="thanks" role="status">
-          <p class="lede">Thank you. Your answer reached Daniela on {{ new Date(sent).toLocaleString('en-GB') }}.</p>
-          <p class="small">If you ever want to change it, just write to her.</p>
+          <p class="lede">Thank you. Your picks reached Daniela on {{ new Date(sent).toLocaleString('en-GB') }}.</p>
+          <p class="small">Want to change them? Just write to her.</p>
         </div>
-        <form v-else class="form" @submit.prevent="submitConsent">
-          <p class="lede">I would love to show this session as part of my work. Please tick what you are comfortable with. Every tick is optional, free of charge, and you are always credited.</p>
-          <fieldset>
-            <legend class="mono">I allow Photon·EsTuDios to use the photographs for</legend>
-            <label v-for="g in GRANTS" :key="g.k" class="check"><input v-model="form.grants[g.k]" type="checkbox"><span>{{ g.t }}</span></label>
-            <button type="button" class="link" @click="selectAll">Tick everything except the private frames</button>
-          </fieldset>
-          <label class="check"><input v-model="form.wantsApproval" type="checkbox"><span>I would like to see where an image will be used before it is published.</span></label>
-          <div class="fields">
-            <label><span class="mono">Your name</span><input v-model="form.name" type="text" autocomplete="name" required></label>
-            <label><span class="mono">Email (optional)</span><input v-model="form.email" type="email" autocomplete="email"></label>
-            <label><span class="mono">Credit me as</span><input v-model="form.creditAs" type="text" placeholder="This is Mama Lou"></label>
-            <label class="wide"><span class="mono">Anything else (optional)</span><textarea v-model="form.note" rows="3"></textarea></label>
-            <label><span class="mono">Signature: type your full name</span><input v-model="form.signature" type="text" required class="sig"></label>
-          </div>
-          <label class="check"><input v-model="form.confirmed" type="checkbox" required><span>I am the person in these photographs. I grant the uses ticked above, free of charge and without time limit. I can withdraw permission for future uses at any time by writing to Daniela.</span></label>
+        <form v-else class="form" @submit.prevent="submitPicks">
+          <p class="lede">Send Daniela the proofs you would like finished in full. <b>{{ favs.length }} of 5 chosen</b><span v-if="favs.length">: {{ favs.join(', ') }}</span></p>
+          <label class="fields"><span class="mono">A note (optional)</span><textarea v-model="note" rows="3"></textarea></label>
           <p v-if="formError" class="err" role="alert">{{ formError }}</p>
-          <button type="submit" class="btn big" :disabled="sending">{{ sending ? 'Sending…' : 'Send my answer' }}</button>
+          <button type="submit" class="btn big" :disabled="sending">{{ sending ? 'Sending…' : 'Send my picks' }}</button>
         </form>
       </section>
     </main>
