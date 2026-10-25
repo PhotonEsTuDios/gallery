@@ -131,7 +131,7 @@ async function submitPicks() {
       </section>
 
       <section class="block" aria-labelledby="edit">
-        <h2 id="edit" class="h2"><span class="num">02</span>The edit <small class="mono">24 frames</small></h2>
+        <h2 id="edit" class="h2"><span class="num">02</span>The edit <small class="mono">{{ data.hero.length }} frames</small></h2>
         <div class="masonry">
           <figure v-for="(h, i) in data.hero" :key="h.name" class="tile">
             <button type="button" class="open" :aria-label="`View frame ${h.n} full screen`" @click="lb = i">
