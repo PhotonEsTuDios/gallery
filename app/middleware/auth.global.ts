@@ -1,5 +1,7 @@
 export default defineNuxtRouteMiddleware(async (to) => {
   if (to.path === '/login') return
+  // Private Künstler-Shares haben ein eigenes Passwort + Cookie
+  if (to.path.startsWith('/s/')) return
 
   // Auth-Status nur EINMAL prüfen (beim ersten Laden, serverseitig) und merken.
   // Bei Klick-Navigation danach KEIN /api/me mehr -> blockiert die Navigation nie

@@ -1,7 +1,8 @@
 import { COOKIE_NAME, verifyToken } from '../utils/auth'
 
 // Schützt alle Daten-/Bild-Endpunkte. Login/Logout/Me bleiben offen.
-const OPEN = ['/api/login', '/api/logout', '/api/me']
+// /api/share/* prüft das eigene Share-Cookie selbst (siehe server/utils/share.ts)
+const OPEN = ['/api/login', '/api/logout', '/api/me', '/api/share/']
 
 export default defineEventHandler((event) => {
   const path = event.path || ''

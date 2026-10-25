@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const route = useRoute()
-const showChrome = computed(() => route.path !== '/login')
+// Keine Galerie-Navigation auf Login und auf privaten Künstler-Shares
+const showChrome = computed(() => route.path !== '/login' && !route.path.startsWith('/s/'))
 
 const authed = useState('authed', () => false)
 async function logout() {
