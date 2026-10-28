@@ -51,6 +51,13 @@ async function logout() {
           >
             Karte
           </NuxtLink>
+          <NuxtLink
+            to="/auswahl"
+            class="transition hover:text-neutral-200"
+            :class="route.path === '/auswahl' ? 'text-neutral-200' : 'text-neutral-500'"
+          >
+            Auswahl
+          </NuxtLink>
         </nav>
       </div>
       <button
