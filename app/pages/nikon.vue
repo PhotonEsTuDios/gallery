@@ -9,7 +9,8 @@ interface CameraPhoto {
   blurry: boolean
 }
 
-const { data, pending } = useFetch<CameraPhoto[]>('/api/nikon', { lazy: true })
+// server: false – mit ~15k Einträgen im SSR-Payload sprengt die Seite das Lambda-Antwortlimit (502)
+const { data, pending } = useFetch<CameraPhoto[]>('/api/nikon', { lazy: true, server: false })
 const { picks, load } = usePortfolio()
 onMounted(() => load())
 
