@@ -52,6 +52,13 @@ async function logout() {
             Karte
           </NuxtLink>
           <NuxtLink
+            to="/nikon"
+            class="transition hover:text-neutral-200"
+            :class="route.path === '/nikon' ? 'text-neutral-200' : 'text-neutral-500'"
+          >
+            Nikon
+          </NuxtLink>
+          <NuxtLink
             to="/auswahl"
             class="transition hover:text-neutral-200"
             :class="route.path === '/auswahl' ? 'text-neutral-200' : 'text-neutral-500'"

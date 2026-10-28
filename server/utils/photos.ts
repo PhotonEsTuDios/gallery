@@ -16,6 +16,9 @@ export interface Photo {
   colors?: string[]
   gps_lat?: number
   gps_lon?: number
+  // Aus dem EXIF-Header (camera_extract.py)
+  camera_make?: string
+  camera_model?: string
 }
 
 export interface Album {
@@ -74,7 +77,7 @@ export async function getAllPhotos(region: string, table: string): Promise<Photo
       new ScanCommand({
         TableName: table,
         ProjectionExpression:
-          'sha256, s3_key, original_filename, source_path, #b, uploaded_at, taken_at, quality_score, blurry, dominant_colors, gps_lat, gps_lon',
+          'sha256, s3_key, original_filename, source_path, #b, uploaded_at, taken_at, quality_score, blurry, dominant_colors, gps_lat, gps_lon, camera_make, camera_model',
         ExpressionAttributeNames: { '#b': 'bytes' },
         ExclusiveStartKey,
       }),
@@ -99,6 +102,8 @@ export async function getAllPhotos(region: string, table: string): Promise<Photo
         colors: Array.isArray(it.dominant_colors) ? it.dominant_colors : undefined,
         gps_lat: it.gps_lat != null ? Number(it.gps_lat) : undefined,
         gps_lon: it.gps_lon != null ? Number(it.gps_lon) : undefined,
+        camera_make: it.camera_make || undefined,
+        camera_model: it.camera_model || undefined,
       })
     }
     ExclusiveStartKey = res.LastEvaluatedKey
@@ -278,4 +283,31 @@ export async function getMapPins(region: string, table: string): Promise<{ count
     .filter((p) => p.gps_lat != null && p.gps_lon != null)
     .map((p) => ({ sha: p.sha, filename: p.filename, lat: p.gps_lat!, lon: p.gps_lon! }))
   return { count: pins.length, pins }
+}
+
+// ---- Nikon (Danielas eigene Kameras) -------------------------------------
+export interface CameraPhoto {
+  sha: string
+  filename: string
+  kind: 'photo' | 'video'
+  model: string
+  taken_at: string
+  blurry: boolean
+}
+
+// Alles, was mit einer Nikon aufgenommen wurde, neueste Aufnahme zuerst.
+// Modellname ohne doppeltes "NIKON" ("NIKON Z 6_2" -> "Z 6_2").
+export async function getNikonPhotos(region: string, table: string): Promise<CameraPhoto[]> {
+  const photos = await getAllPhotos(region, table)
+  return photos
+    .filter((p) => (p.camera_make ?? '').toUpperCase().includes('NIKON') && !HIDDEN_ALBUMS.has(p.album))
+    .map((p) => ({
+      sha: p.sha,
+      filename: p.filename,
+      kind: p.kind,
+      model: (p.camera_model ?? '').replace(/^NIKON\s+/i, '').trim() || 'Nikon',
+      taken_at: p.taken_at ?? p.uploaded_at,
+      blurry: !!p.blurry,
+    }))
+    .sort((a, b) => (a.taken_at < b.taken_at ? 1 : -1))
 }
