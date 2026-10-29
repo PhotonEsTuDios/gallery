@@ -7,7 +7,8 @@ interface Album {
 }
 
 // lazy = Seite öffnet sofort, Liste lädt im Hintergrund (Navigation bleibt frei)
-const { data: albums, pending } = useFetch<Album[]>('/api/albums', { lazy: true })
+const { query } = useHerkunft()
+const { data: albums, pending } = useFetch<Album[]>('/api/albums', { lazy: true, query })
 </script>
 
 <template>

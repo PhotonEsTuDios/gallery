@@ -15,7 +15,8 @@ interface AlbumData {
 
 const route = useRoute()
 const name = computed(() => route.params.name as string)
-const { data: album, pending, error } = useFetch<AlbumData>(() => `/api/album/${name.value}`, { lazy: true })
+const { query } = useHerkunft()
+const { data: album, pending, error } = useFetch<AlbumData>(() => `/api/album/${name.value}`, { lazy: true, query })
 
 // Foto/Video-Filter
 type Kind = 'all' | 'photo' | 'video'

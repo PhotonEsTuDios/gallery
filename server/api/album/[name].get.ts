@@ -1,11 +1,11 @@
-import { getAlbumPhotos } from '../../utils/photos'
+import { getAlbumPhotos, herkunftFrom } from '../../utils/photos'
 
 export default defineEventHandler(async (event) => {
   const cfg = useRuntimeConfig(event)
   const name = decodeURIComponent(getRouterParam(event, 'name') || '')
   if (!name) throw createError({ statusCode: 400, statusMessage: 'Album fehlt' })
 
-  const photos = await getAlbumPhotos(cfg.awsRegion, cfg.photosTable, name)
+  const photos = await getAlbumPhotos(cfg.awsRegion, cfg.photosTable, name, herkunftFrom(event))
   if (!photos.length) throw createError({ statusCode: 404, statusMessage: 'Album leer' })
 
   return {

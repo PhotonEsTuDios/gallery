@@ -12,7 +12,8 @@ interface MapData {
   pins: MapPin[]
 }
 
-const { data } = useFetch<MapData>('/api/map', { lazy: true })
+const { query } = useHerkunft()
+const { data } = useFetch<MapData>('/api/map', { lazy: true, query })
 
 const mapEl = ref<HTMLElement | null>(null)
 let map: any = null

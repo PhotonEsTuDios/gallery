@@ -2,6 +2,8 @@
 const route = useRoute()
 // Keine Galerie-Navigation auf Login und auf privaten Künstler-Shares
 const showChrome = computed(() => route.path !== '/login' && !route.path.startsWith('/s/'))
+// Herkunfts-Filter nur dort, wo Fotolisten gezeigt werden
+const showFilter = computed(() => ['/', '/timeline', '/labels', '/map', '/nikon'].includes(route.path) || route.path.startsWith('/album/'))
 
 const authed = useState('authed', () => false)
 async function logout() {
@@ -65,6 +67,13 @@ async function logout() {
           >
             Auswahl
           </NuxtLink>
+          <NuxtLink
+            to="/import"
+            class="transition hover:text-neutral-200"
+            :class="route.path === '/import' ? 'text-neutral-200' : 'text-neutral-500'"
+          >
+            Import
+          </NuxtLink>
         </nav>
       </div>
       <button
@@ -74,6 +83,10 @@ async function logout() {
         Abmelden
       </button>
     </header>
+
+    <div v-if="showChrome && showFilter" class="border-b border-line px-5 py-2">
+      <HerkunftFilter />
+    </div>
 
     <main class="flex-1">
       <NuxtPage />

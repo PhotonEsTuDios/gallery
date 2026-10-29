@@ -12,7 +12,8 @@ interface LabelData {
   items: LabeledPhoto[]
 }
 
-const { data, pending } = useFetch<LabelData>('/api/labels', { lazy: true })
+const { query } = useHerkunft()
+const { data, pending } = useFetch<LabelData>('/api/labels', { lazy: true, query })
 
 type Tab = 'best' | 'blurry' | 'color'
 const tab = ref<Tab>('best')

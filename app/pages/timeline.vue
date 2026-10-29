@@ -14,18 +14,25 @@ interface Photo {
 }
 
 // 1) Leichter Index zuerst — nur Monate + Anzahl (winzig), noch keine Bilder.
-const { data: months, pending } = useFetch<TimelineMonth[]>('/api/timeline', { lazy: true })
+const { query } = useHerkunft()
+const { data: months, pending } = useFetch<TimelineMonth[]>('/api/timeline', { lazy: true, query })
 
 // 2) Pro Monat nachgeladene Bilder + welche Monate gerade gerendert werden.
 const loaded = reactive<Record<string, Photo[]>>({})
 const started = reactive<Record<string, boolean>>({}) // verhindert Doppel-Fetch
 const renderedMap = reactive<Record<string, boolean>>({}) // <img> im DOM ja/nein
 
+// Herkunft gewechselt -> nachgeladene Monate verwerfen
+watch(query, () => {
+  for (const k of Object.keys(loaded)) delete loaded[k]
+  for (const k of Object.keys(started)) delete started[k]
+})
+
 async function loadMonth(ym: string) {
   if (started[ym]) return
   started[ym] = true
   try {
-    loaded[ym] = await $fetch<Photo[]>(`/api/timeline/${ym}`)
+    loaded[ym] = await $fetch<Photo[]>(`/api/timeline/${ym}`, { query: query.value })
   } catch {
     started[ym] = false // Fehler -> später erneut versuchen
   }

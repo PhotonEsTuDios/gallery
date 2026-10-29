@@ -1,5 +1,34 @@
 import { ScanCommand } from '@aws-sdk/lib-dynamodb'
+import type { H3Event } from 'h3'
 import { ddb } from './aws'
+
+// ---- Herkunft (Quelle) -----------------------------------------------------
+// Ein Foto kann aus mehreren Quellen stammen (gleicher SHA in Dropbox UND im
+// Time-Machine-Backup) -> `sources` (Liste) plus das alte Einzelfeld `source`.
+export type Origin = 'dropbox' | 'timemachine' | 'icloud' | 'lokal'
+export const ORIGINS: Origin[] = ['dropbox', 'timemachine', 'icloud', 'lokal']
+
+export function originOf(source: string | undefined): Origin {
+  const s = (source || '').toLowerCase()
+  if (s.startsWith('dropbox')) return 'dropbox'
+  if (s.startsWith('timemachine')) return 'timemachine'
+  if (s.startsWith('icloud') || s.startsWith('photos')) return 'icloud'
+  return 'lokal' // mac:…, drive:…, alte lokale Läufe
+}
+
+// ?herkunft=dropbox,timemachine  -> Set; leer/ungültig -> null (= alle)
+export function herkunftFrom(event: H3Event): Set<Origin> | null {
+  const raw = String(getQuery(event).herkunft || '')
+  const set = new Set(raw.split(',').map((x) => x.trim()).filter((x): x is Origin => (ORIGINS as string[]).includes(x)))
+  // gefilterte Antworten nie in CloudFront cachen
+  setHeader(event, 'cache-control', 'private, no-store')
+  return set.size ? set : null
+}
+
+function byOrigin(photos: Photo[], origins?: Set<Origin> | null): Photo[] {
+  if (!origins) return photos
+  return photos.filter((p) => p.origins.some((o) => origins.has(o)))
+}
 
 export interface Photo {
   sha: string
@@ -19,6 +48,7 @@ export interface Photo {
   // Aus dem EXIF-Header (camera_extract.py)
   camera_make?: string
   camera_model?: string
+  origins: Origin[]
 }
 
 export interface Album {
@@ -32,10 +62,23 @@ export interface Album {
 //  - liegt das Bild in einem benannten Unterordner -> dieser Ordner ("Julie 2014")
 //  - lose Handy-Uploads (direkt in "Kamera-Uploads") oder ohne Ordner
 //    -> nach Jahr gruppiert ("Schnappschüsse 2014"), sonst landet alles in einem Klumpen
+//  - Time-Machine-Pfade ohne sprechenden Ordner (Fotos-Mediathek "originals/A",
+//    App-Container unter Library/, Dropbox-Zip-Exporte, Downloads/Desktop lose)
+//    -> ebenfalls Jahr
+const LOOSE_FOLDERS = new Set(['Kamera-Uploads', 'Camera Uploads', 'Downloads', 'Desktop', 'Documents', 'Pictures', 'Dropbox', 'Movies'])
 function albumOf(sourcePath: string | undefined, dateIso: string | undefined): string {
-  const parts = (sourcePath || '').split('/').filter(Boolean)
+  const path = sourcePath || ''
+  const parts = path.split(/[/!]/).filter(Boolean)
   const parent = parts.length >= 2 ? parts[parts.length - 2] : ''
-  if (parent && parent !== 'Kamera-Uploads') return parent
+  const loose =
+    !parent ||
+    LOOSE_FOLDERS.has(parent) ||
+    path.includes('.photoslibrary/') ||
+    path.startsWith('Library/') ||
+    /\.zip!/i.test(path) ||
+    /^[0-9A-F]$/i.test(parent) ||
+    /^[0-9a-f-]{20,}$/i.test(parent)
+  if (!loose) return parent
   const year = (dateIso || '').slice(0, 4)
   return year ? `Schnappschüsse ${year}` : 'Sonstige'
 }
@@ -77,8 +120,8 @@ export async function getAllPhotos(region: string, table: string): Promise<Photo
       new ScanCommand({
         TableName: table,
         ProjectionExpression:
-          'sha256, s3_key, original_filename, source_path, #b, uploaded_at, taken_at, quality_score, blurry, dominant_colors, gps_lat, gps_lon, camera_make, camera_model',
-        ExpressionAttributeNames: { '#b': 'bytes' },
+          'sha256, s3_key, original_filename, source_path, #b, uploaded_at, taken_at, quality_score, blurry, dominant_colors, gps_lat, gps_lon, camera_make, camera_model, #src, sources',
+        ExpressionAttributeNames: { '#b': 'bytes', '#src': 'source' },
         ExclusiveStartKey,
       }),
     )
@@ -88,11 +131,13 @@ export async function getAllPhotos(region: string, table: string): Promise<Photo
       // RAW/Unbekanntes raus; Videos bleiben (per kind markiert)
       const kind = mediaKind(it.s3_key)
       if (!kind) continue
+      const srcList: string[] = Array.isArray(it.sources) && it.sources.length ? it.sources : [it.source]
+      const origins = [...new Set(srcList.map((x) => originOf(x)))]
       photos.push({
         sha: it.sha256,
         s3_key: it.s3_key,
         filename: it.original_filename ?? it.s3_key,
-        album: albumOf(it.source_path, it.uploaded_at),
+        album: albumOf(it.source_path, it.taken_at || it.uploaded_at),
         bytes: Number(it.bytes ?? 0),
         uploaded_at: it.uploaded_at ?? '',
         taken_at: it.taken_at ?? null,
@@ -104,6 +149,7 @@ export async function getAllPhotos(region: string, table: string): Promise<Photo
         gps_lon: it.gps_lon != null ? Number(it.gps_lon) : undefined,
         camera_make: it.camera_make || undefined,
         camera_model: it.camera_model || undefined,
+        origins,
       })
     }
     ExclusiveStartKey = res.LastEvaluatedKey
@@ -113,8 +159,8 @@ export async function getAllPhotos(region: string, table: string): Promise<Photo
   return photos
 }
 
-export async function getAlbums(region: string, table: string): Promise<Album[]> {
-  const photos = await getAllPhotos(region, table)
+export async function getAlbums(region: string, table: string, origins?: Set<Origin> | null): Promise<Album[]> {
+  const photos = byOrigin(await getAllPhotos(region, table), origins)
   const map = new Map<string, Photo[]>()
   for (const p of photos) {
     const arr = map.get(p.album)
@@ -137,8 +183,8 @@ export async function getAlbums(region: string, table: string): Promise<Album[]>
   return albums
 }
 
-export async function getAlbumPhotos(region: string, table: string, album: string): Promise<Photo[]> {
-  const photos = await getAllPhotos(region, table)
+export async function getAlbumPhotos(region: string, table: string, album: string, origins?: Set<Origin> | null): Promise<Photo[]> {
+  const photos = byOrigin(await getAllPhotos(region, table), origins)
   return photos
     .filter((p) => p.album === album)
     .sort((a, b) => (a.filename < b.filename ? -1 : 1))
@@ -174,8 +220,8 @@ function byNewest(a: Photo, b: Photo): number {
   return a.filename < b.filename ? -1 : 1
 }
 
-export async function getTimelineIndex(region: string, table: string): Promise<TimelineMonth[]> {
-  const photos = await getAllPhotos(region, table)
+export async function getTimelineIndex(region: string, table: string, origins?: Set<Origin> | null): Promise<TimelineMonth[]> {
+  const photos = byOrigin(await getAllPhotos(region, table), origins)
   const map = new Map<string, Photo[]>()
   for (const p of photos) {
     const ym = ymOf(p)
@@ -201,8 +247,8 @@ export interface TimelinePhoto {
   kind: 'photo' | 'video'
 }
 
-export async function getTimelineMonth(region: string, table: string, ym: string): Promise<TimelinePhoto[]> {
-  const photos = await getAllPhotos(region, table)
+export async function getTimelineMonth(region: string, table: string, ym: string, origins?: Set<Origin> | null): Promise<TimelinePhoto[]> {
+  const photos = byOrigin(await getAllPhotos(region, table), origins)
   return photos
     .filter((p) => ymOf(p) === ym)
     .sort(byNewest)
@@ -252,8 +298,8 @@ export interface LabeledPhoto {
 // Alle bereits gelabelten Fotos (quality_score gesetzt), beste Qualität zuerst.
 // Bei sehr großem Bestand auf MAX begrenzt — fürs Frontend handlich.
 const LABELS_MAX = 4000
-export async function getLabeled(region: string, table: string): Promise<{ count: number; items: LabeledPhoto[] }> {
-  const photos = await getAllPhotos(region, table)
+export async function getLabeled(region: string, table: string, origins?: Set<Origin> | null): Promise<{ count: number; items: LabeledPhoto[] }> {
+  const photos = byOrigin(await getAllPhotos(region, table), origins)
   const labeled = photos.filter((p) => p.quality_score != null)
   const items = labeled
     .map((p) => ({
@@ -277,8 +323,8 @@ export interface MapPin {
   lon: number
 }
 
-export async function getMapPins(region: string, table: string): Promise<{ count: number; pins: MapPin[] }> {
-  const photos = await getAllPhotos(region, table)
+export async function getMapPins(region: string, table: string, origins?: Set<Origin> | null): Promise<{ count: number; pins: MapPin[] }> {
+  const photos = byOrigin(await getAllPhotos(region, table), origins)
   const pins = photos
     .filter((p) => p.gps_lat != null && p.gps_lon != null)
     .map((p) => ({ sha: p.sha, filename: p.filename, lat: p.gps_lat!, lon: p.gps_lon! }))
@@ -297,8 +343,8 @@ export interface CameraPhoto {
 
 // Alles, was mit einer Nikon aufgenommen wurde, neueste Aufnahme zuerst.
 // Modellname ohne doppeltes "NIKON" ("NIKON Z 6_2" -> "Z 6_2").
-export async function getNikonPhotos(region: string, table: string): Promise<CameraPhoto[]> {
-  const photos = await getAllPhotos(region, table)
+export async function getNikonPhotos(region: string, table: string, origins?: Set<Origin> | null): Promise<CameraPhoto[]> {
+  const photos = byOrigin(await getAllPhotos(region, table), origins)
   return photos
     .filter((p) => (p.camera_make ?? '').toUpperCase().includes('NIKON') && !HIDDEN_ALBUMS.has(p.album))
     .map((p) => ({
@@ -310,4 +356,12 @@ export async function getNikonPhotos(region: string, table: string): Promise<Cam
       blurry: !!p.blurry,
     }))
     .sort((a, b) => (a.taken_at < b.taken_at ? 1 : -1))
+}
+
+// ---- Herkunft-Zähler (für die Filterleiste) --------------------------------
+export async function getOriginCounts(region: string, table: string): Promise<Record<Origin, number> & { total: number }> {
+  const photos = await getAllPhotos(region, table)
+  const out = { dropbox: 0, timemachine: 0, icloud: 0, lokal: 0, total: photos.length }
+  for (const p of photos) for (const o of p.origins) out[o]++
+  return out
 }
