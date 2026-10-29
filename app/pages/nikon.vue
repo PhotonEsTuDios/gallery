@@ -11,7 +11,15 @@ interface CameraPhoto {
 
 // server: false – mit ~15k Einträgen im SSR-Payload sprengt die Seite das Lambda-Antwortlimit (502)
 const { query } = useHerkunft()
-const { data, pending } = useFetch<CameraPhoto[]>('/api/nikon', { lazy: true, server: false, query })
+// Kompakte Spalten-Antwort vom Server (siehe server/api/nikon.get.ts) wieder zu Objekten machen
+type NikonRow = [string, string, number, string, number]
+const { data, pending } = useFetch<{ m: string[]; r: NikonRow[] }, unknown, string, CameraPhoto[]>('/api/nikon', {
+  lazy: true,
+  server: false,
+  query,
+  transform: ({ m, r }) =>
+    r.map(([sha, filename, mi, taken_at, f]) => ({ sha, filename, model: m[mi], taken_at, kind: f & 1 ? 'video' : 'photo', blurry: !!(f & 2) })),
+})
 const { picks, load } = usePortfolio()
 onMounted(() => load())
 

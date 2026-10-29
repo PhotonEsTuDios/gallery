@@ -61,7 +61,9 @@ echo "▸ 4/6  Lambda-Konfiguration (Handler + Env)…"
 aws lambda update-function-configuration \
   --function-name "$FUNCTION_NAME" --region "$AWS_REGION" --no-cli-pager \
   --handler "server/index.handler" \
+  --memory-size "${LAMBDA_MEMORY:-3008}" \
   --environment "Variables={GALLERY_PASSWORD=$GALLERY_PASSWORD,SESSION_SECRET=$SESSION_SECRET,PHOTOS_BUCKET=${PHOTOS_BUCKET:-photonestudios-photos},PHOTOS_TABLE=${PHOTOS_TABLE:-photonestudios-photos}}" >/dev/null
+# Speicher: Die Gallery hält den ganzen Foto-Index im RAM (87k Einträge brauchten >2 GB, Okt 2026).
 # Hinweis: AWS_REGION ist reserviert und wird NICHT gesetzt (Runtime liefert sie).
 
 echo "▸ 5/6  Code hochladen…"
