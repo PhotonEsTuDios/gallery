@@ -68,13 +68,13 @@ function eta(h?: number | null) {
         </div>
 
         <dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
-          <div><dt class="text-xs text-neutral-500">neu im Archiv</dt><dd>{{ fmt(p.counts?.new) }}</dd></div>
+          <div><dt class="text-xs text-neutral-500">neu (dieser Lauf)</dt><dd>{{ fmt(p.counts?.new) }}</dd></div>
           <div><dt class="text-xs text-neutral-500">schon vorhanden</dt><dd>{{ fmt(p.counts?.dup) }}</dd></div>
           <div><dt class="text-xs text-neutral-500">übersprungen</dt><dd>{{ fmt(p.counts?.skip) }}</dd></div>
           <div><dt class="text-xs text-neutral-500">Fehler</dt><dd :class="p.counts?.err ? 'text-rose-400' : ''">{{ fmt(p.counts?.err) }}</dd></div>
           <div><dt class="text-xs text-neutral-500">Tempo</dt><dd>{{ p.rate_mb_s }} MB/s</dd></div>
           <div><dt class="text-xs text-neutral-500">Restzeit</dt><dd>{{ p.state === 'fertig' ? '–' : eta(p.eta_h) }}</dd></div>
-          <div><dt class="text-xs text-neutral-500">Batches</dt><dd>{{ p.batches }}</dd></div>
+          <div><dt class="text-xs text-neutral-500">Pakete fertig</dt><dd>{{ p.batches }}</dd></div>
           <div><dt class="text-xs text-neutral-500">aktualisiert</dt><dd>{{ ago(p.updated_at) }}</dd></div>
         </dl>
         <p v-if="p.current" class="mt-3 text-xs text-neutral-500">{{ p.current }}</p>
