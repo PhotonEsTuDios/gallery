@@ -1,0 +1,35 @@
+{
+  "version": "2026-10-25",
+  "intro": "I would love to show this session as part of my work. Tick what you are comfortable with. Every use is free of charge and always credited to you.",
+  "grants": [
+    {
+      "k": "website",
+      "t": "The Photon·EsTuDios website and online portfolio"
+    },
+    {
+      "k": "social",
+      "t": "Photon·EsTuDios social media"
+    },
+    {
+      "k": "competitions",
+      "t": "Photography competitions, awards and exhibitions"
+    },
+    {
+      "k": "print",
+      "t": "Printed portfolios, books, magazines and features"
+    },
+    {
+      "k": "promotion",
+      "t": "Promoting Photon·EsTuDios services"
+    },
+    {
+      "k": "future",
+      "t": "Future formats not listed here, always with credit to you"
+    },
+    {
+      "k": "privateFrames",
+      "t": "Also the three private frames. Without this tick they stay yours alone."
+    }
+  ],
+  "confirm": "I am the person in these photographs. I grant the uses ticked above, free of charge and without time limit. I can withdraw permission for future uses at any time by writing to Daniela Haering."
+}
