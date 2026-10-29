@@ -10,12 +10,16 @@
 #   DISTRIBUTION_ID=E6NIDGDE02P23
 #   AWS_PROFILE=photon
 #   AWS_REGION=eu-west-1
+#   PHOTOS_BUCKET=… (optional, sonst aus .env)
 set -euo pipefail
 cd "$(dirname "$0")"
 
-[ -f .deploy.env ] || { echo "✗ .deploy.env fehlt (siehe Kopf von deploy.sh)"; exit 1; }
-[ -f .env ]        || { echo "✗ .env fehlt (GALLERY_PASSWORD / SESSION_SECRET)"; exit 1; }
-set -a; . ./.deploy.env; . ./.env; set +a
+# DEPLOY_ENV wählt das Ziel, z.B. DEPLOY_ENV=.deploy.env.photon-new ./deploy.sh
+DEPLOY_ENV="${DEPLOY_ENV:-.deploy.env}"
+[ -f "$DEPLOY_ENV" ] || { echo "✗ $DEPLOY_ENV fehlt (siehe Kopf von deploy.sh)"; exit 1; }
+[ -f .env ]          || { echo "✗ .env fehlt (GALLERY_PASSWORD / SESSION_SECRET)"; exit 1; }
+# .env zuerst, dann das Ziel: Profil/Bucket aus DEPLOY_ENV gewinnen.
+set -a; . ./.env; . "./$DEPLOY_ENV"; set +a
 
 : "${FUNCTION_NAME:?FUNCTION_NAME fehlt in .deploy.env}"
 : "${DISTRIBUTION_ID:?DISTRIBUTION_ID fehlt in .deploy.env}"
@@ -80,4 +84,4 @@ aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" \
   --paths "/*" --no-cli-pager >/dev/null && echo "  ✓ Invalidation gestartet"
 
 rm -f function.zip
-echo "✅ Deploy fertig → https://gallery.photonestudios.com"
+echo "✅ Deploy fertig ($DEPLOY_ENV, $AWS_PROFILE, $FUNCTION_NAME)"
