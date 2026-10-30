@@ -10,10 +10,22 @@ interface MapPin {
 interface MapData {
   count: number
   pins: MapPin[]
+  next: number | null
 }
 
 const { query } = useHerkunft()
-const { data } = useFetch<MapData>('/api/map', { lazy: true, query })
+// Seitenweise und nur im Browser (gallery#2); Pins erst setzen, wenn alle Seiten da sind.
+const data = shallowRef<MapData | null>(null)
+let run = 0
+async function loadAll() {
+  const mine = ++run
+  let acc: MapData | null = null
+  await fetchPages<MapData>('/api/map', query.value, (page) => {
+    acc = acc ? { ...page, pins: acc.pins.concat(page.pins) } : page
+  }, () => mine !== run)
+  if (mine === run) data.value = acc
+}
+onMounted(loadAll)
 
 const mapEl = ref<HTMLElement | null>(null)
 let map: any = null

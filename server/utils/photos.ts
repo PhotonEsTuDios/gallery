@@ -1,6 +1,8 @@
 import { ScanCommand } from '@aws-sdk/lib-dynamodb'
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
+import { gunzipSync, gzipSync } from 'node:zlib'
 import type { H3Event } from 'h3'
-import { ddb } from './aws'
+import { ddb, s3, streamToBuffer } from './aws'
 
 // ---- Herkunft (Quelle) -----------------------------------------------------
 // Ein Foto kann aus mehreren Quellen stammen (gleicher SHA in Dropbox UND im
@@ -104,13 +106,71 @@ function albumYear(name: string): number {
   return m ? Number(m[0]) : 0
 }
 
-// Lambda-/Node-Prozess hält den Scan 5 Minuten im RAM.
+// ---- Foto-Index (gallery#2) --------------------------------------------------
+// Früher: jeder Kaltstart scannte die ganze Tabelle (87k Einträge, 4–5 s, wächst mit).
+// Jetzt: fertiger Index als gzip-JSON in S3. Ablauf in getAllPhotos():
+//  1. RAM-Cache jünger als 5 Min -> sofort
+//  2. sonst Index-Datei aus S3 laden (ETag-Abgleich: unverändert = 304, kostet fast nichts)
+//  3. Datei fehlt, falsches Format oder älter als 30 Min -> einmal scannen, Datei neu schreiben
+// Kosten: ein Scan ≈ 7.900 Lese-Einheiten ≈ 0,1 Cent, höchstens alle 30 Min und nur wenn jemand schaut.
 const TTL_MS = 5 * 60 * 1000
-let cache: { at: number; photos: Photo[] } | null = null
+const REBUILD_MS = 30 * 60 * 1000
+export const INDEX_KEY = 'index/gallery-photos.json.gz'
+const INDEX_VERSION = 1 // hochzählen, wenn sich Photo/albumOf ändert -> erzwingt Neuaufbau
 
-export async function getAllPhotos(region: string, table: string): Promise<Photo[]> {
+interface IndexFile { v: number; builtAt: number; photos: Photo[] }
+let cache: { at: number; builtAt: number; etag?: string; photos: Photo[] } | null = null
+let inflight: Promise<Photo[]> | null = null
+
+export async function getAllPhotos(region: string, table: string, bucket?: string): Promise<Photo[]> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.photos
+  // parallele Anfragen teilen sich einen Lade-/Scan-Vorgang
+  if (!inflight) inflight = loadIndex(region, table, bucket || useRuntimeConfig().photosBucket).finally(() => (inflight = null))
+  return inflight
+}
 
+async function loadIndex(region: string, table: string, bucket: string): Promise<Photo[]> {
+  try {
+    const res = await s3(region).send(new GetObjectCommand({ Bucket: bucket, Key: INDEX_KEY, IfNoneMatch: cache?.etag }))
+    const file = JSON.parse(gunzipSync(await streamToBuffer(res.Body)).toString('utf8')) as IndexFile
+    if (file.v === INDEX_VERSION && Date.now() - file.builtAt < REBUILD_MS) {
+      cache = { at: Date.now(), builtAt: file.builtAt, etag: res.ETag, photos: file.photos }
+      return file.photos
+    }
+  } catch (e: any) {
+    const status = e?.$metadata?.httpStatusCode
+    // 304 = unverändert: RAM-Stand behalten, solange er frisch genug ist
+    if (status === 304 && cache && Date.now() - cache.builtAt < REBUILD_MS) {
+      cache.at = Date.now()
+      return cache.photos
+    }
+    // 403/404 = Datei fehlt (ohne ListBucket-Recht meldet S3 403) -> neu bauen
+    if (status !== 304 && status !== 403 && status !== 404) console.warn('[index] S3-Laden fehlgeschlagen', status, e?.name)
+  }
+  return rebuildIndex(region, table, bucket)
+}
+
+export async function rebuildIndex(region: string, table: string, bucket: string): Promise<Photo[]> {
+  const t0 = Date.now()
+  const photos = await scanPhotos(region, table)
+  const builtAt = Date.now()
+  let etag: string | undefined
+  try {
+    const body = gzipSync(JSON.stringify({ v: INDEX_VERSION, builtAt, photos } satisfies IndexFile))
+    const put = await s3(region).send(
+      new PutObjectCommand({ Bucket: bucket, Key: INDEX_KEY, Body: body, ContentType: 'application/json', ContentEncoding: 'gzip' }),
+    )
+    etag = put.ETag
+    console.log(`[index] neu gebaut: ${photos.length} Einträge, ${(body.length / 1024 / 1024).toFixed(2)} MB gz, ${Date.now() - t0} ms`)
+  } catch (e: any) {
+    // Schreiben fehlgeschlagen -> trotzdem ausliefern, nächster Kaltstart versucht es erneut
+    console.warn('[index] Schreiben fehlgeschlagen', e?.name)
+  }
+  cache = { at: Date.now(), builtAt, etag, photos }
+  return photos
+}
+
+async function scanPhotos(region: string, table: string): Promise<Photo[]> {
   const doc = ddb(region)
   const photos: Photo[] = []
   let ExclusiveStartKey: Record<string, any> | undefined
@@ -155,7 +215,6 @@ export async function getAllPhotos(region: string, table: string): Promise<Photo
     ExclusiveStartKey = res.LastEvaluatedKey
   } while (ExclusiveStartKey)
 
-  cache = { at: Date.now(), photos }
   return photos
 }
 

@@ -11,12 +11,35 @@ interface AlbumData {
   name: string
   count: number
   photos: Photo[]
+  next: number | null
 }
 
 const route = useRoute()
 const name = computed(() => route.params.name as string)
 const { query } = useHerkunft()
-const { data: album, pending, error } = useFetch<AlbumData>(() => `/api/album/${name.value}`, { lazy: true, query })
+// Seitenweise und nur im Browser laden (gallery#2): große Alben sprengten sonst Antwort + SSR-HTML.
+const album = shallowRef<AlbumData | null>(null)
+const pending = ref(true)
+const error = ref<unknown>(null)
+let run = 0
+async function loadAll() {
+  const mine = ++run
+  pending.value = true
+  error.value = null
+  album.value = null
+  try {
+    await fetchPages<AlbumData>(`/api/album/${encodeURIComponent(name.value)}`, query.value, (page) => {
+      album.value = album.value ? { ...page, photos: album.value.photos.concat(page.photos) } : page
+      pending.value = false
+    }, () => mine !== run)
+  } catch (e) {
+    if (mine === run && !album.value) error.value = e
+  } finally {
+    if (mine === run) pending.value = false
+  }
+}
+onMounted(loadAll)
+watch([name, query], loadAll)
 
 // Foto/Video-Filter
 type Kind = 'all' | 'photo' | 'video'

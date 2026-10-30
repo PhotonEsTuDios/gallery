@@ -9,17 +9,34 @@ interface CameraPhoto {
   blurry: boolean
 }
 
-// server: false – mit ~15k Einträgen im SSR-Payload sprengt die Seite das Lambda-Antwortlimit (502)
+// Seitenweise vom Server (siehe server/api/nikon.get.ts), nur im Browser (kein SSR-Payload).
+// Kompakte Spaltenzeilen werden hier wieder zu Objekten.
 const { query } = useHerkunft()
-// Kompakte Spalten-Antwort vom Server (siehe server/api/nikon.get.ts) wieder zu Objekten machen
 type NikonRow = [string, string, number, string, number]
-const { data, pending } = useFetch<{ m: string[]; r: NikonRow[] }, unknown, string, CameraPhoto[]>('/api/nikon', {
-  lazy: true,
-  server: false,
-  query,
-  transform: ({ m, r }) =>
-    r.map(([sha, filename, mi, taken_at, f]) => ({ sha, filename, model: m[mi], taken_at, kind: f & 1 ? 'video' : 'photo', blurry: !!(f & 2) })),
-})
+type NikonPage = { m: string[]; r: NikonRow[]; total: number; next: number | null }
+const data = shallowRef<CameraPhoto[] | null>(null)
+const total = ref(0)
+const pending = ref(true)
+let run = 0
+async function loadAll() {
+  const mine = ++run
+  pending.value = true
+  data.value = null
+  let acc: CameraPhoto[] = []
+  try {
+    await fetchPages<NikonPage>('/api/nikon', query.value, ({ m, r, total: t }) => {
+      total.value = t
+      acc = acc.concat(r.map(([sha, filename, mi, taken_at, f]) => ({ sha, filename, model: m[mi], taken_at, kind: f & 1 ? 'video' : 'photo', blurry: !!(f & 2) })))
+      data.value = acc
+      pending.value = false
+    }, () => mine !== run)
+  } finally {
+    if (mine === run) pending.value = false
+  }
+}
+onMounted(loadAll)
+watch(query, loadAll)
+const loadingMore = computed(() => !!data.value && data.value.length < total.value)
 const { picks, load } = usePortfolio()
 onMounted(() => load())
 
@@ -89,7 +106,7 @@ function open(i: number) {
   <div class="mx-auto max-w-7xl px-5 py-8">
     <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
       <h1 class="text-sm uppercase tracking-[0.2em] text-neutral-500">Nikon</h1>
-      <span v-if="data" class="text-xs text-neutral-500">{{ all.length.toLocaleString('de-DE') }} Aufnahmen</span>
+      <span v-if="data" class="text-xs text-neutral-500">{{ all.length.toLocaleString('de-DE') }}<template v-if="loadingMore"> von {{ total.toLocaleString('de-DE') }}, lade weiter…</template> Aufnahmen</span>
     </div>
 
     <p v-if="pending" class="text-sm text-neutral-500">Lade…</p>

@@ -32,7 +32,11 @@ async function loadMonth(ym: string) {
   if (started[ym]) return
   started[ym] = true
   try {
-    loaded[ym] = await $fetch<Photo[]>(`/api/timeline/${ym}`, { query: query.value })
+    // seitenweise (gallery#2); erste Seite sofort zeigen, Rest anhängen
+    const q = query.value
+    await fetchPages<{ items: Photo[]; next: number | null }>(`/api/timeline/${ym}`, q, ({ items }) => {
+      loaded[ym] = (loaded[ym] ?? []).concat(items)
+    }, () => q !== query.value)
   } catch {
     started[ym] = false // Fehler -> später erneut versuchen
   }
