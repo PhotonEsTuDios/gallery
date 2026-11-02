@@ -16,3 +16,4 @@ function.zip
 *.log
 .DS_Store
 .aws-sso
+smoke_*.png

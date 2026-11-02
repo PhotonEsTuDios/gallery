@@ -3,6 +3,7 @@ import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import type { H3Event } from 'h3'
 import { ddb, s3, streamToBuffer } from './aws'
+import { assignSessions, takenOf } from './sessions'
 
 // ---- Herkunft (Quelle) -----------------------------------------------------
 // Ein Foto kann aus mehreren Quellen stammen (gleicher SHA in Dropbox UND im
@@ -58,21 +59,26 @@ export interface Album {
   count: number
   cover: string // sha des Titelbilds
   latest: string // jüngstes uploaded_at
+  date: string // Aufnahmedatum des Albums (JJJJ-MM-TT), Sortierung + Jahres-Gruppen
+  year: number // 0 = ohne Datum
 }
 
 // Album bestimmen:
 //  - liegt das Bild in einem benannten Unterordner -> dieser Ordner ("Julie 2014")
-//  - lose Handy-Uploads (direkt in "Kamera-Uploads") oder ohne Ordner
-//    -> nach Jahr gruppiert ("Schnappschüsse 2014"), sonst landet alles in einem Klumpen
-//  - Time-Machine-Pfade ohne sprechenden Ordner (Fotos-Mediathek "originals/A",
-//    App-Container unter Library/, Dropbox-Zip-Exporte, Downloads/Desktop lose)
-//    -> ebenfalls Jahr
+//  - lose Handy-Uploads (direkt in "Kamera-Uploads") oder ohne Ordner, Time-Machine-Pfade
+//    ohne sprechenden Ordner (Fotos-Mediathek "originals/A", App-Container unter Library/,
+//    Dropbox-Zip-Exporte, Downloads/Desktop lose) -> "lose" (isLoose)
+//    -> werden beim Indexaufbau per Aufnahmezeit zu Sessions gebündelt (sessions.ts, staubsauger#8);
+//       nur ohne jede Aufnahmezeit bleibt "Schnappschüsse JJJJ" nach Upload-Jahr
 const LOOSE_FOLDERS = new Set(['Kamera-Uploads', 'Camera Uploads', 'Downloads', 'Desktop', 'Documents', 'Pictures', 'Dropbox', 'Movies'])
-function albumOf(sourcePath: string | undefined, dateIso: string | undefined): string {
+function parentFolder(sourcePath: string | undefined): { path: string; parent: string } {
   const path = sourcePath || ''
   const parts = path.split(/[/!]/).filter(Boolean)
-  const parent = parts.length >= 2 ? parts[parts.length - 2] : ''
-  const loose =
+  return { path, parent: parts.length >= 2 ? parts[parts.length - 2] : '' }
+}
+function isLoose(sourcePath: string | undefined): boolean {
+  const { path, parent } = parentFolder(sourcePath)
+  return (
     !parent ||
     LOOSE_FOLDERS.has(parent) ||
     path.includes('.photoslibrary/') ||
@@ -80,7 +86,10 @@ function albumOf(sourcePath: string | undefined, dateIso: string | undefined): s
     /\.zip!/i.test(path) ||
     /^[0-9A-F]$/i.test(parent) ||
     /^[0-9a-f-]{20,}$/i.test(parent)
-  if (!loose) return parent
+  )
+}
+function albumOf(sourcePath: string | undefined, dateIso: string | undefined): string {
+  if (!isLoose(sourcePath)) return parentFolder(sourcePath).parent
   const year = (dateIso || '').slice(0, 4)
   return year ? `Schnappschüsse ${year}` : 'Sonstige'
 }
@@ -116,7 +125,7 @@ function albumYear(name: string): number {
 const TTL_MS = 5 * 60 * 1000
 const REBUILD_MS = 30 * 60 * 1000
 export const INDEX_KEY = 'index/gallery-photos.json.gz'
-const INDEX_VERSION = 1 // hochzählen, wenn sich Photo/albumOf ändert -> erzwingt Neuaufbau
+const INDEX_VERSION = 2 // hochzählen, wenn sich Photo/albumOf ändert -> erzwingt Neuaufbau
 
 interface IndexFile { v: number; builtAt: number; photos: Photo[] }
 let cache: { at: number; builtAt: number; etag?: string; photos: Photo[] } | null = null
@@ -173,6 +182,7 @@ export async function rebuildIndex(region: string, table: string, bucket: string
 async function scanPhotos(region: string, table: string): Promise<Photo[]> {
   const doc = ddb(region)
   const photos: Photo[] = []
+  const loose = new Set<string>() // shas ohne sprechenden Ordner -> Sessions
   let ExclusiveStartKey: Record<string, any> | undefined
 
   do {
@@ -193,6 +203,7 @@ async function scanPhotos(region: string, table: string): Promise<Photo[]> {
       if (!kind) continue
       const srcList: string[] = Array.isArray(it.sources) && it.sources.length ? it.sources : [it.source]
       const origins = [...new Set(srcList.map((x) => originOf(x)))]
+      if (isLoose(it.source_path)) loose.add(it.sha256)
       photos.push({
         sha: it.sha256,
         s3_key: it.s3_key,
@@ -215,6 +226,8 @@ async function scanPhotos(region: string, table: string): Promise<Photo[]> {
     ExclusiveStartKey = res.LastEvaluatedKey
   } while (ExclusiveStartKey)
 
+  // lose Bilder nach Aufnahmezeit zu Sessions bündeln (staubsauger#8)
+  assignSessions(photos, (p) => loose.has(p.sha))
   return photos
 }
 
@@ -229,24 +242,43 @@ export async function getAlbums(region: string, table: string, origins?: Set<Ori
   const albums: Album[] = []
   for (const [name, arr] of map) {
     if (HIDDEN_ALBUMS.has(name)) continue
-    arr.sort((a, b) => (a.uploaded_at < b.uploaded_at ? 1 : -1))
+    let latest = '', earliest = ''
+    for (const p of arr) {
+      if (p.uploaded_at > latest) latest = p.uploaded_at
+      const t = takenOf(p)
+      if (t && (!earliest || t < earliest)) earliest = t
+    }
+    // Titelbild: das schärfste/beste gelabelte Foto, sonst das zuerst aufgenommene
+    let cover: Photo | undefined
+    for (const p of arr) {
+      if (p.kind !== 'photo') continue
+      if (!cover || (p.quality_score ?? -1) > (cover.quality_score ?? -1)) cover = p
+    }
+    const date = earliest ? earliest.slice(0, 10) : ''
     albums.push({
       name,
       count: arr.length,
-      cover: (arr.find((p) => p.kind === 'photo') ?? arr[0]).sha,
-      latest: arr[0].uploaded_at,
+      cover: (cover ?? arr[0]).sha,
+      latest,
+      date,
+      year: date ? Number(date.slice(0, 4)) : albumYear(name),
     })
   }
-  // chronologisch: jüngstes Jahr zuerst; bei gleichem/keinem Jahr nach Upload-Datum
-  albums.sort((a, b) => albumYear(b.name) - albumYear(a.name) || (a.latest < b.latest ? 1 : -1))
+  // chronologisch: jüngstes zuerst (Aufnahmedatum), ohne Datum nach Upload-Datum ganz unten
+  albums.sort((a, b) => b.year - a.year || (a.date < b.date ? 1 : a.date > b.date ? -1 : 0) || (a.latest < b.latest ? 1 : -1))
   return albums
+}
+
+// Album-Inhalt in Aufnahme-Reihenfolge; ohne Aufnahmezeit nach Dateiname ans Ende
+function byTaken(a: Photo, b: Photo): number {
+  const ta = takenOf(a) ?? '~', tb = takenOf(b) ?? '~'
+  if (ta !== tb) return ta < tb ? -1 : 1
+  return a.filename < b.filename ? -1 : 1
 }
 
 export async function getAlbumPhotos(region: string, table: string, album: string, origins?: Set<Origin> | null): Promise<Photo[]> {
   const photos = byOrigin(await getAllPhotos(region, table), origins)
-  return photos
-    .filter((p) => p.album === album)
-    .sort((a, b) => (a.filename < b.filename ? -1 : 1))
+  return photos.filter((p) => p.album === album).sort(byTaken)
 }
 
 // ---- Timeline (nach Monat) -------------------------------------------------

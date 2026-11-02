@@ -80,6 +80,18 @@ await paged('/api/map', 'pins', 'count')
 // Herkunfts-Filter (eigene, ungecachte Antworten)
 for (const h of ['dropbox', 'timemachine']) await api(`/api/albums?herkunft=${h}`)
 
+// Sessions statt Jahres-Klumpen (staubsauger#8): kein "Schnappschüsse JJJJ" mehr mit tausenden Bildern,
+// jedes Album hat Jahr + Datum für die Jahres-Gruppen, Liste kommt jüngstes zuerst.
+if (Array.isArray(albums) && albums.length) {
+  const klumpen = albums.filter((a) => /^Schnappschüsse \d{4}$/.test(a.name) && a.count > 1000)
+  ok('keine Jahres-Klumpen > 1000', klumpen.length === 0, klumpen.map((a) => `${a.name} (${a.count})`).join(', '))
+  const sessions = albums.filter((a) => /^\d{1,2}\. /.test(a.name)).length
+  ok('Session-Alben vorhanden', sessions > 100, `${sessions} von ${albums.length} Alben`)
+  ok('Alben haben Jahr', albums.every((a) => typeof a.year === 'number'), '')
+  const sorted = albums.every((a, i) => i === 0 || albums[i - 1].year >= a.year)
+  ok('Alben jüngstes Jahr zuerst', sorted, `${albums[0].year} … ${albums[albums.length - 1].year}`)
+}
+
 // Die größten Einheiten sind die Engstellen: größtes Album, größter Monat
 if (Array.isArray(albums) && albums.length) {
   const big = [...albums].sort((a, b) => b.count - a.count)[0]
