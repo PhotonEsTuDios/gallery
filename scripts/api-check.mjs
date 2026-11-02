@@ -101,6 +101,9 @@ if (Array.isArray(albums) && albums.length) {
 } else ok('Albenliste', false)
 if (Array.isArray(months) && months.length) {
   const big = [...months].sort((a, b) => b.count - a.count)[0]
+  // gallery#3: Timeline nach Aufnahmezeit. Nach Upload-Datum hatte 2022-08 16.012 Bilder (Time-Machine-Upload).
+  ok('kein Monster-Monat (Aufnahmezeit statt Upload)', big.count < 10000, `${big.ym}: ${big.count}`)
+  if (big.count > 5000) note('größter Monat über einer Seite', `${big.ym}: ${big.count} → Kacheln pro Monat prüfen`)
   console.log(`  größter Monat: ${big.ym} (${big.count} Bilder)`)
   const m = await paged('/api/timeline/' + big.ym, 'items')
   ok('größter Monat = Timeline-Index', m?.total === big.count, `${m?.total} = ${big.count}`)

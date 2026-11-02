@@ -282,7 +282,9 @@ export async function getAlbumPhotos(region: string, table: string, album: strin
 }
 
 // ---- Timeline (nach Monat) -------------------------------------------------
-// Datum = uploaded_at (taken_at ist aktuell leer; kommt mit dem EXIF-Ausbau).
+// Datum = Aufnahmezeit (takenOf: EXIF taken_at oder Dropbox-Dateiname), gallery#3.
+// Vorher uploaded_at: da landeten 16.012 Time-Machine-Bilder im Upload-Monat 2022-08
+// und die Seite rendete einen Riesen-Grid. Nach Aufnahmezeit ist der größte Monat ~2.600.
 export interface TimelineMonth {
   ym: string // "2026-06"  bzw. "0000-00" für Fotos ohne Datum
   label: string // "Juni 2026"
@@ -296,7 +298,7 @@ const MONTHS_DE = [
 ]
 
 function ymOf(p: Photo): string {
-  return (p.uploaded_at || '').slice(0, 7) || '0000-00'
+  return (takenOf(p) || '').slice(0, 7) || '0000-00'
 }
 
 function labelOf(ym: string): string {
@@ -305,9 +307,10 @@ function labelOf(ym: string): string {
   return `${MONTHS_DE[Number(m) - 1] ?? m} ${y}`
 }
 
-// Innerhalb eines Monats: jüngstes zuerst (uploaded_at desc), dann Dateiname.
+// Innerhalb eines Monats: jüngste Aufnahme zuerst, dann Dateiname.
 function byNewest(a: Photo, b: Photo): number {
-  if (a.uploaded_at !== b.uploaded_at) return a.uploaded_at < b.uploaded_at ? 1 : -1
+  const ta = takenOf(a) ?? a.uploaded_at, tb = takenOf(b) ?? b.uploaded_at
+  if (ta !== tb) return ta < tb ? 1 : -1
   return a.filename < b.filename ? -1 : 1
 }
 
@@ -335,6 +338,7 @@ export interface TimelinePhoto {
   filename: string
   bytes: number
   uploaded_at: string
+  taken_at: string | null
   kind: 'photo' | 'video'
 }
 
@@ -343,7 +347,7 @@ export async function getTimelineMonth(region: string, table: string, ym: string
   return photos
     .filter((p) => ymOf(p) === ym)
     .sort(byNewest)
-    .map((p) => ({ sha: p.sha, filename: p.filename, bytes: p.bytes, uploaded_at: p.uploaded_at, kind: p.kind }))
+    .map((p) => ({ sha: p.sha, filename: p.filename, bytes: p.bytes, uploaded_at: p.uploaded_at, taken_at: takenOf(p), kind: p.kind }))
 }
 
 // ---- Labels (Auto-Labeling) ------------------------------------------------

@@ -10,6 +10,7 @@ interface Photo {
   filename: string
   bytes: number
   uploaded_at: string
+  taken_at: string | null
   kind: 'photo' | 'video'
 }
 
@@ -28,9 +29,29 @@ watch(query, () => {
   for (const k of Object.keys(started)) delete started[k]
 })
 
-async function loadMonth(ym: string) {
+// Monate nacheinander laden, höchstens 2 parallel (gallery#3): Beim Öffnen kommen ~13 Monate
+// gleichzeitig in Sichtnähe. 13 parallele Anfragen = 13 kalte Lambda-Instanzen à 1–3 s.
+// Mit einer kleinen Warteschlange bedient eine warme Instanz alle in ~0,2 s je Monat.
+const MAX_PARALLEL = 2
+const queue: string[] = []
+let running = 0
+function loadMonth(ym: string) {
   if (started[ym]) return
   started[ym] = true
+  queue.push(ym)
+  pump()
+}
+function pump() {
+  while (running < MAX_PARALLEL && queue.length) {
+    const ym = queue.shift()!
+    running++
+    fetchMonth(ym).finally(() => {
+      running--
+      pump()
+    })
+  }
+}
+async function fetchMonth(ym: string) {
   try {
     // seitenweise (gallery#2); erste Seite sofort zeigen, Rest anhängen
     const q = query.value
@@ -46,6 +67,8 @@ async function loadMonth(ym: string) {
 type Density = 'S' | 'M' | 'L'
 const CELL_TARGET: Record<Density, number> = { S: 78, M: 120, L: 200 } // Ziel-Kachelbreite px
 const density = ref<Density>('L')
+// Thumbnail-Breite zur Dichte: S-Kacheln sind 78 px, da reicht w=200 auch auf Retina (halbe Bytes).
+const thumbW = computed(() => (density.value === 'S' ? 200 : 400))
 onMounted(() => {
   const saved = localStorage.getItem('tl-density') as Density | null
   if (saved === 'S' || saved === 'M' || saved === 'L') density.value = saved
@@ -100,6 +123,9 @@ function onIntersect(entries: IntersectionObserverEntry[]) {
     if (!ym || !e.isIntersecting) continue
     // Einmal in Sichtnaehe gerendert -> bleibt gerendert (kein Entladen =
     // kein Rein/Raus-Flackern beim Scrollen). Danach nicht mehr beobachten.
+    // Die reservierte Höhe bleibt, bis die Daten da sind (gallery#3): sonst klappt der
+    // Monat kurz zusammen, alle folgenden rutschen in den Beobachtungsbereich und die
+    // ganze Timeline lädt kaskadenartig.
     renderedMap[ym] = true
     loadMonth(ym)
     const el = sectionEls.get(ym)
@@ -207,7 +233,7 @@ function open(sha: string) {
         :key="m.ym"
         :ref="(el) => setSectionRef(m.ym, el as Element | null)"
         :data-ym="m.ym"
-        :style="(renderedMap[m.ym] || mediaFilter !== 'all') ? undefined : { minHeight: sectionHeight(m) + 'px' }"
+        :style="(loaded[m.ym]?.length || mediaFilter !== 'all') ? undefined : { minHeight: sectionHeight(m) + 'px' }"
       >
         <h2
           class="sticky top-[52px] z-10 -mx-5 mb-2 bg-ink/85 px-5 py-2 text-sm font-medium backdrop-blur"
@@ -221,16 +247,18 @@ function open(sha: string) {
           class="mb-8"
           :style="{ display: 'grid', gridTemplateColumns: `repeat(${cols()}, 1fr)`, gap: GAP + 'px' }"
         >
+          <!-- content-visibility: Kacheln außerhalb des Fensters werden nicht gelayoutet/gemalt
+               (gallery#3: Monate mit 2.000+ Kacheln bremsen sonst das Scrollen) -->
           <button
             v-for="p in shownIn(m.ym)"
             :key="p.sha"
-            class="group relative aspect-square overflow-hidden rounded-md border border-line bg-ink-soft"
+            class="group relative aspect-square overflow-hidden rounded-md border border-line bg-ink-soft [content-visibility:auto]"
             @click="open(p.sha)"
           >
             <VideoTile v-if="p.kind === 'video'" :sha="p.sha" :filename="p.filename" />
             <img
               v-else
-              :src="`/img/${p.sha}?w=400`"
+              :src="`/img/${p.sha}?w=${thumbW}`"
               :alt="p.filename"
               loading="lazy"
               class="h-full w-full object-cover transition duration-300 group-hover:opacity-90"
