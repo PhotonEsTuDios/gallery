@@ -88,9 +88,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
       />
       <p v-if="isVideo && !videoUrl" class="absolute text-sm text-neutral-400">Video lädt…</p>
 
-      <!-- Bild -->
+      <!-- Bild (gallery#6: explizit v-if — ein v-else hing am „Video lädt…“-Hinweis darüber
+           und zeigte bei geladenem Video zusätzlich ein kaputtes <img>) -->
       <img
-        v-else
+        v-if="!isVideo"
         :src="`/img/${current.sha}?w=1600`"
         :alt="current.filename"
         class="max-h-[88vh] max-w-[92vw] object-contain"
