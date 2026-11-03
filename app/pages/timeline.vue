@@ -15,7 +15,7 @@ interface Photo {
 }
 
 // 1) Leichter Index zuerst — nur Monate + Anzahl (winzig), noch keine Bilder.
-const { query } = useHerkunft()
+const { query } = useFilter()
 const { data: months, pending } = useFetch<TimelineMonth[]>('/api/timeline', { lazy: true, query })
 
 // 2) Pro Monat nachgeladene Bilder + welche Monate gerade gerendert werden.

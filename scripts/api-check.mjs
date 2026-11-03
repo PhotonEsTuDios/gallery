@@ -78,7 +78,11 @@ for (const path of ['/api/albums', '/api/timeline', '/api/labels', '/api/import'
 await paged('/api/nikon', 'r')
 await paged('/api/map', 'pins', 'count')
 // Herkunfts-Filter (eigene, ungecachte Antworten)
-for (const h of ['dropbox', 'timemachine']) await api(`/api/albums?herkunft=${h}`)
+for (const h of ['dropbox', 'timemachine', 'icloud']) {
+  const r = await api(`/api/albums?herkunft=${h}`)
+  const n = (Array.isArray(r) ? r : r?.albums || []).length
+  ok(`Herkunft ${h} hat Alben`, n > 0, `${n} Alben`)
+}
 
 // Sessions statt Jahres-Klumpen (staubsauger#8): kein "Schnappschüsse JJJJ" mehr mit tausenden Bildern,
 // jedes Album hat Jahr + Datum für die Jahres-Gruppen, Liste kommt jüngstes zuerst.

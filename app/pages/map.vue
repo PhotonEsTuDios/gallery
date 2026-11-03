@@ -13,7 +13,7 @@ interface MapData {
   next: number | null
 }
 
-const { query } = useHerkunft()
+const { query } = useFilter()
 // Seitenweise und nur im Browser (gallery#2); Pins erst setzen, wenn alle Seiten da sind.
 const data = shallowRef<MapData | null>(null)
 let run = 0
@@ -26,10 +26,11 @@ async function loadAll() {
   if (mine === run) data.value = acc
 }
 onMounted(loadAll)
+watch(query, loadAll) // Filter geändert -> Pins neu laden (gallery#8)
 
 const mapEl = ref<HTMLElement | null>(null)
 let map: any = null
-let added = false
+let layer: any = null
 
 onMounted(async () => {
   const L = (await import('leaflet')).default
@@ -38,14 +39,16 @@ onMounted(async () => {
     attribution: '© OpenStreetMap',
     maxZoom: 19,
   }).addTo(map)
-  // Pins setzen, sobald die Daten da sind (einmalig)
+  // Pins setzen, sobald die Daten da sind; bei neuem Filter Ebene leeren und neu füllen (gallery#8)
   watchEffect(() => {
-    if (added || !map || !data.value?.pins?.length) return
+    if (!map || !data.value) return
+    layer?.remove()
+    layer = L.layerGroup().addTo(map)
     const pts: [number, number][] = []
     for (const p of data.value.pins) {
       const m = L.circleMarker([p.lat, p.lon], {
         radius: 6, color: '#fff', weight: 1, fillColor: '#e67e22', fillOpacity: 0.9,
-      }).addTo(map)
+      }).addTo(layer)
       m.bindPopup(
         `<a href="/img/${p.sha}?dl=1" target="_blank" rel="noopener">` +
         `<img src="/img/${p.sha}?w=200" style="width:160px;display:block;border-radius:6px"/></a>` +
@@ -53,8 +56,7 @@ onMounted(async () => {
       )
       pts.push([p.lat, p.lon])
     }
-    map.fitBounds(pts, { padding: [50, 50], maxZoom: 14 })
-    added = true
+    if (pts.length) map.fitBounds(pts, { padding: [50, 50], maxZoom: 14 })
   })
 })
 onUnmounted(() => map?.remove())

@@ -12,7 +12,7 @@ interface LabelData {
   items: LabeledPhoto[]
 }
 
-const { query } = useHerkunft()
+const { query } = useFilter()
 const { data, pending } = useFetch<LabelData>('/api/labels', { lazy: true, query })
 
 type Tab = 'best' | 'blurry' | 'color'

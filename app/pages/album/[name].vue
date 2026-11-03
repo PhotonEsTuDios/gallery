@@ -16,7 +16,7 @@ interface AlbumData {
 
 const route = useRoute()
 const name = computed(() => route.params.name as string)
-const { query } = useHerkunft()
+const { query } = useFilter()
 // Seitenweise und nur im Browser laden (gallery#2): große Alben sprengten sonst Antwort + SSR-HTML.
 const album = shallowRef<AlbumData | null>(null)
 const pending = ref(true)

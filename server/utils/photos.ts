@@ -4,13 +4,11 @@ import { gunzipSync, gzipSync } from 'node:zlib'
 import type { H3Event } from 'h3'
 import { ddb, s3, streamToBuffer } from './aws'
 import { assignSessions, takenOf } from './sessions'
+import { applyFilter, colorFamily, parseFilter, type Filter, type Origin } from './filter'
 
 // ---- Herkunft (Quelle) -----------------------------------------------------
 // Ein Foto kann aus mehreren Quellen stammen (gleicher SHA in Dropbox UND im
 // Time-Machine-Backup) -> `sources` (Liste) plus das alte Einzelfeld `source`.
-export type Origin = 'dropbox' | 'timemachine' | 'icloud' | 'lokal'
-export const ORIGINS: Origin[] = ['dropbox', 'timemachine', 'icloud', 'lokal']
-
 export function originOf(source: string | undefined): Origin {
   const s = (source || '').toLowerCase()
   if (s.startsWith('dropbox')) return 'dropbox'
@@ -19,18 +17,17 @@ export function originOf(source: string | undefined): Origin {
   return 'lokal' // mac:…, drive:…, alte lokale Läufe
 }
 
-// ?herkunft=dropbox,timemachine  -> Set; leer/ungültig -> null (= alle)
-export function herkunftFrom(event: H3Event): Set<Origin> | null {
-  const raw = String(getQuery(event).herkunft || '')
-  const set = new Set(raw.split(',').map((x) => x.trim()).filter((x): x is Origin => (ORIGINS as string[]).includes(x)))
+// ---- Gemeinsamer Filter (gallery#8) ------------------------------------------
+// Alle Ansichten lesen denselben Filter aus der URL (Personen, Farbe, Jahr, Herkunft), siehe filter.ts.
+export function filterFrom(event: H3Event): Filter | null {
+  const f = parseFilter(getQuery(event))
   // gefilterte Antworten nie in CloudFront cachen
-  setHeader(event, 'cache-control', 'private, no-store')
-  return set.size ? set : null
+  if (f) setHeader(event, 'cache-control', 'private, no-store')
+  return f
 }
 
-function byOrigin(photos: Photo[], origins?: Set<Origin> | null): Photo[] {
-  if (!origins) return photos
-  return photos.filter((p) => p.origins.some((o) => origins.has(o)))
+function filtered(photos: Photo[], f?: Filter | null): Photo[] {
+  return applyFilter(photos, f ?? null, takenOf)
 }
 
 export interface Photo {
@@ -52,6 +49,8 @@ export interface Photo {
   camera_make?: string
   camera_model?: string
   origins: Origin[]
+  // Personen aus der Gesichtserkennung (staubsauger#14, gallery#7)
+  persons?: string[]
 }
 
 export interface Album {
@@ -125,7 +124,7 @@ function albumYear(name: string): number {
 const TTL_MS = 5 * 60 * 1000
 const REBUILD_MS = 30 * 60 * 1000
 export const INDEX_KEY = 'index/gallery-photos.json.gz'
-const INDEX_VERSION = 2 // hochzählen, wenn sich Photo/albumOf ändert -> erzwingt Neuaufbau
+const INDEX_VERSION = 3 // hochzählen, wenn sich Photo/albumOf ändert -> erzwingt Neuaufbau
 
 interface IndexFile { v: number; builtAt: number; photos: Photo[] }
 let cache: { at: number; builtAt: number; etag?: string; photos: Photo[] } | null = null
@@ -190,7 +189,7 @@ async function scanPhotos(region: string, table: string): Promise<Photo[]> {
       new ScanCommand({
         TableName: table,
         ProjectionExpression:
-          'sha256, s3_key, original_filename, source_path, #b, uploaded_at, taken_at, quality_score, blurry, dominant_colors, gps_lat, gps_lon, camera_make, camera_model, #src, sources',
+          'sha256, s3_key, original_filename, source_path, #b, uploaded_at, taken_at, quality_score, blurry, dominant_colors, gps_lat, gps_lon, camera_make, camera_model, #src, sources, persons',
         ExpressionAttributeNames: { '#b': 'bytes', '#src': 'source' },
         ExclusiveStartKey,
       }),
@@ -221,6 +220,7 @@ async function scanPhotos(region: string, table: string): Promise<Photo[]> {
         camera_make: it.camera_make || undefined,
         camera_model: it.camera_model || undefined,
         origins,
+        persons: it.persons ? [...it.persons].sort() : undefined,
       })
     }
     ExclusiveStartKey = res.LastEvaluatedKey
@@ -231,8 +231,8 @@ async function scanPhotos(region: string, table: string): Promise<Photo[]> {
   return photos
 }
 
-export async function getAlbums(region: string, table: string, origins?: Set<Origin> | null): Promise<Album[]> {
-  const photos = byOrigin(await getAllPhotos(region, table), origins)
+export async function getAlbums(region: string, table: string, f?: Filter | null): Promise<Album[]> {
+  const photos = filtered(await getAllPhotos(region, table), f)
   const map = new Map<string, Photo[]>()
   for (const p of photos) {
     const arr = map.get(p.album)
@@ -276,8 +276,8 @@ function byTaken(a: Photo, b: Photo): number {
   return a.filename < b.filename ? -1 : 1
 }
 
-export async function getAlbumPhotos(region: string, table: string, album: string, origins?: Set<Origin> | null): Promise<Photo[]> {
-  const photos = byOrigin(await getAllPhotos(region, table), origins)
+export async function getAlbumPhotos(region: string, table: string, album: string, f?: Filter | null): Promise<Photo[]> {
+  const photos = filtered(await getAllPhotos(region, table), f)
   return photos.filter((p) => p.album === album).sort(byTaken)
 }
 
@@ -314,8 +314,8 @@ function byNewest(a: Photo, b: Photo): number {
   return a.filename < b.filename ? -1 : 1
 }
 
-export async function getTimelineIndex(region: string, table: string, origins?: Set<Origin> | null): Promise<TimelineMonth[]> {
-  const photos = byOrigin(await getAllPhotos(region, table), origins)
+export async function getTimelineIndex(region: string, table: string, f?: Filter | null): Promise<TimelineMonth[]> {
+  const photos = filtered(await getAllPhotos(region, table), f)
   const map = new Map<string, Photo[]>()
   for (const p of photos) {
     const ym = ymOf(p)
@@ -342,8 +342,8 @@ export interface TimelinePhoto {
   kind: 'photo' | 'video'
 }
 
-export async function getTimelineMonth(region: string, table: string, ym: string, origins?: Set<Origin> | null): Promise<TimelinePhoto[]> {
-  const photos = byOrigin(await getAllPhotos(region, table), origins)
+export async function getTimelineMonth(region: string, table: string, ym: string, f?: Filter | null): Promise<TimelinePhoto[]> {
+  const photos = filtered(await getAllPhotos(region, table), f)
   return photos
     .filter((p) => ymOf(p) === ym)
     .sort(byNewest)
@@ -351,36 +351,6 @@ export async function getTimelineMonth(region: string, table: string, ym: string
 }
 
 // ---- Labels (Auto-Labeling) ------------------------------------------------
-// Ordnet einen Hex-Farbwert einer groben Farbfamilie zu (fürs "nach Farbe"-Filtern).
-export function colorFamily(hex?: string): string {
-  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return 'Neutral'
-  const r = parseInt(hex.slice(1, 3), 16) / 255
-  const g = parseInt(hex.slice(3, 5), 16) / 255
-  const b = parseInt(hex.slice(5, 7), 16) / 255
-  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min
-  const v = max
-  const s = max === 0 ? 0 : d / max
-  let h = 0
-  if (d !== 0) {
-    if (max === r) h = 60 * (((g - b) / d) % 6)
-    else if (max === g) h = 60 * ((b - r) / d + 2)
-    else h = 60 * ((r - g) / d + 4)
-  }
-  if (h < 0) h += 360
-
-  if (v < 0.16) return 'Schwarz'
-  if (s < 0.15 && v > 0.82) return 'Weiß'
-  if (s < 0.16) return 'Grau'
-  if (h < 15 || h >= 345) return 'Rot'
-  if (h < 45) return v < 0.55 ? 'Braun' : 'Orange'
-  if (h < 70) return 'Gelb'
-  if (h < 165) return 'Grün'
-  if (h < 200) return 'Türkis'
-  if (h < 255) return 'Blau'
-  if (h < 300) return 'Lila'
-  return 'Pink'
-}
-
 export interface LabeledPhoto {
   sha: string
   filename: string
@@ -393,8 +363,8 @@ export interface LabeledPhoto {
 // Alle bereits gelabelten Fotos (quality_score gesetzt), beste Qualität zuerst.
 // Bei sehr großem Bestand auf MAX begrenzt — fürs Frontend handlich.
 const LABELS_MAX = 4000
-export async function getLabeled(region: string, table: string, origins?: Set<Origin> | null): Promise<{ count: number; items: LabeledPhoto[] }> {
-  const photos = byOrigin(await getAllPhotos(region, table), origins)
+export async function getLabeled(region: string, table: string, f?: Filter | null): Promise<{ count: number; items: LabeledPhoto[] }> {
+  const photos = filtered(await getAllPhotos(region, table), f)
   const labeled = photos.filter((p) => p.quality_score != null)
   const items = labeled
     .map((p) => ({
@@ -418,8 +388,8 @@ export interface MapPin {
   lon: number
 }
 
-export async function getMapPins(region: string, table: string, origins?: Set<Origin> | null): Promise<{ count: number; pins: MapPin[] }> {
-  const photos = byOrigin(await getAllPhotos(region, table), origins)
+export async function getMapPins(region: string, table: string, f?: Filter | null): Promise<{ count: number; pins: MapPin[] }> {
+  const photos = filtered(await getAllPhotos(region, table), f)
   const pins = photos
     .filter((p) => p.gps_lat != null && p.gps_lon != null)
     .map((p) => ({ sha: p.sha, filename: p.filename, lat: p.gps_lat!, lon: p.gps_lon! }))
@@ -438,8 +408,8 @@ export interface CameraPhoto {
 
 // Alles, was mit einer Nikon aufgenommen wurde, neueste Aufnahme zuerst.
 // Modellname ohne doppeltes "NIKON" ("NIKON Z 6_2" -> "Z 6_2").
-export async function getNikonPhotos(region: string, table: string, origins?: Set<Origin> | null): Promise<CameraPhoto[]> {
-  const photos = byOrigin(await getAllPhotos(region, table), origins)
+export async function getNikonPhotos(region: string, table: string, f?: Filter | null): Promise<CameraPhoto[]> {
+  const photos = filtered(await getAllPhotos(region, table), f)
   return photos
     .filter((p) => (p.camera_make ?? '').toUpperCase().includes('NIKON') && !HIDDEN_ALBUMS.has(p.album))
     .map((p) => ({

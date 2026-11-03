@@ -9,7 +9,7 @@ interface Album {
 }
 
 // lazy = Seite öffnet sofort, Liste lädt im Hintergrund (Navigation bleibt frei)
-const { query } = useHerkunft()
+const { query, to } = useFilter()
 const { data: albums, pending } = useFetch<Album[]>('/api/albums', { lazy: true, query })
 
 // Nach Jahr gruppiert (staubsauger#8): statt 18 Jahres-Klumpen gibt es jetzt ~1.500
@@ -42,7 +42,7 @@ const years = computed(() => {
         <NuxtLink
           v-for="a in y.albums"
           :key="a.name"
-          :to="`/album/${encodeURIComponent(a.name)}`"
+          :to="to(`/album/${encodeURIComponent(a.name)}`)"
           class="group relative aspect-square overflow-hidden rounded-xl border border-line"
         >
           <img

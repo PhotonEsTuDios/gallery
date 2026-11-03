@@ -4,6 +4,8 @@ const route = useRoute()
 const showChrome = computed(() => route.path !== '/login' && !route.path.startsWith('/s/'))
 // Herkunfts-Filter nur dort, wo Fotolisten gezeigt werden
 const showFilter = computed(() => ['/', '/timeline', '/labels', '/map', '/nikon'].includes(route.path) || route.path.startsWith('/album/'))
+// Filter wandert beim Ansichtswechsel mit (gallery#8)
+const { to } = useFilter()
 
 const authed = useState('authed', () => false)
 async function logout() {
@@ -26,39 +28,46 @@ async function logout() {
         </NuxtLink>
         <nav class="flex items-center gap-4 text-xs uppercase tracking-[0.15em]">
           <NuxtLink
-            to="/"
+            :to="to('/')"
             class="transition hover:text-neutral-200"
             :class="route.path === '/' ? 'text-neutral-200' : 'text-neutral-500'"
           >
             Alben
           </NuxtLink>
           <NuxtLink
-            to="/timeline"
+            :to="to('/timeline')"
             class="transition hover:text-neutral-200"
             :class="route.path === '/timeline' ? 'text-neutral-200' : 'text-neutral-500'"
           >
             Timeline
           </NuxtLink>
           <NuxtLink
-            to="/labels"
+            :to="to('/labels')"
             class="transition hover:text-neutral-200"
             :class="route.path === '/labels' ? 'text-neutral-200' : 'text-neutral-500'"
           >
             Labels
           </NuxtLink>
           <NuxtLink
-            to="/map"
+            :to="to('/map')"
             class="transition hover:text-neutral-200"
             :class="route.path === '/map' ? 'text-neutral-200' : 'text-neutral-500'"
           >
             Karte
           </NuxtLink>
           <NuxtLink
-            to="/nikon"
+            :to="to('/nikon')"
             class="transition hover:text-neutral-200"
             :class="route.path === '/nikon' ? 'text-neutral-200' : 'text-neutral-500'"
           >
             Nikon
+          </NuxtLink>
+          <NuxtLink
+            to="/personen"
+            class="transition hover:text-neutral-200"
+            :class="route.path === '/personen' ? 'text-neutral-200' : 'text-neutral-500'"
+          >
+            Personen
           </NuxtLink>
           <NuxtLink
             to="/auswahl"
@@ -85,7 +94,7 @@ async function logout() {
     </header>
 
     <div v-if="showChrome && showFilter" class="border-b border-line px-5 py-2">
-      <HerkunftFilter />
+      <FilterBar />
     </div>
 
     <main class="flex-1">

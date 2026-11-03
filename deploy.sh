@@ -28,6 +28,10 @@ set -a; . ./.env; . "./$DEPLOY_ENV"; set +a
 SHARP_VERSION="${SHARP_VERSION:-0.35.1}"
 LIBVIPS_VERSION="${LIBVIPS_VERSION:-1.3.0}"
 
+echo "▸ 0/6  Tests + Rechte (infra/iam.sh)…"
+npm test --silent >/dev/null || { echo "  ✗ Tests rot, kein Deploy"; exit 1; }
+PHOTOS_BUCKET="${PHOTOS_BUCKET:?PHOTOS_BUCKET fehlt}" ./infra/iam.sh
+
 echo "▸ 1/6  Build (Nitro aws-lambda, serveStatic)…"
 NITRO_PRESET=aws-lambda npm run build
 

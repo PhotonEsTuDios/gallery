@@ -11,7 +11,7 @@ interface CameraPhoto {
 
 // Seitenweise vom Server (siehe server/api/nikon.get.ts), nur im Browser (kein SSR-Payload).
 // Kompakte Spaltenzeilen werden hier wieder zu Objekten.
-const { query } = useHerkunft()
+const { query } = useFilter()
 type NikonRow = [string, string, number, string, number]
 type NikonPage = { m: string[]; r: NikonRow[]; total: number; next: number | null }
 const data = shallowRef<CameraPhoto[] | null>(null)

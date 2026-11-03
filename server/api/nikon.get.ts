@@ -1,4 +1,4 @@
-import { getNikonPhotos, herkunftFrom } from '../utils/photos'
+import { getNikonPhotos, filterFrom } from '../utils/photos'
 import { pageOf } from '../utils/page'
 
 // Kompakte Spalten-Antwort, seitenweise (gallery#2): ~35k Nikon-Bilder sprengten sonst das 6-MB-Limit.
@@ -7,7 +7,7 @@ import { pageOf } from '../utils/page'
 // Reihenfolge: jüngstes zuerst. Weitere Seiten über ?offset=<next>.
 export default defineEventHandler(async (event) => {
   const cfg = useRuntimeConfig(event)
-  const photos = await getNikonPhotos(cfg.awsRegion, cfg.photosTable, herkunftFrom(event))
+  const photos = await getNikonPhotos(cfg.awsRegion, cfg.photosTable, filterFrom(event))
   const m: string[] = []
   const idx = new Map<string, number>()
   for (const p of photos) if (!idx.has(p.model)) { idx.set(p.model, m.length); m.push(p.model) }

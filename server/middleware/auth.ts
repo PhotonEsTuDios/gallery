@@ -9,6 +9,7 @@ export default defineEventHandler((event) => {
   const guarded =
     path.startsWith('/img/') ||
     path.startsWith('/poster/') ||
+    path.startsWith('/face/') ||
     (path.startsWith('/api/') && !OPEN.some((o) => path.startsWith(o)))
   if (!guarded) return
 

@@ -26,6 +26,8 @@ export default defineNuxtConfig({
     awsRegion: process.env.AWS_REGION || 'eu-west-1',
     photosBucket: process.env.PHOTOS_BUCKET || 'photonestudios-photos',
     photosTable: process.env.PHOTOS_TABLE || 'photonestudios-photos',
+    facesTable: process.env.FACES_TABLE || 'photonestudios-faces',
+    facesFunction: process.env.FACES_FUNCTION || 'photon-faces',
   },
 
   app: {
