@@ -27,6 +27,7 @@ const renderedMap = reactive<Record<string, boolean>>({}) // <img> im DOM ja/nei
 watch(query, () => {
   for (const k of Object.keys(loaded)) delete loaded[k]
   for (const k of Object.keys(started)) delete started[k]
+  queue.length = 0
 })
 
 // Monate nacheinander laden, höchstens 2 parallel (gallery#3): Beim Öffnen kommen ~13 Monate
@@ -41,9 +42,17 @@ function loadMonth(ym: string) {
   queue.push(ym)
   pump()
 }
+// gallery#5: LIFO statt FIFO — der zuletzt in Sicht gekommene Monat (= wo man gerade ist)
+// lädt zuerst. Beim Sprung/Hochscrollen wartet er nicht mehr hinter allen Monaten dazwischen.
+function unqueue(ym: string) {
+  const i = queue.indexOf(ym)
+  if (i < 0) return
+  queue.splice(i, 1)
+  started[ym] = false // noch nicht angefragt -> beim nächsten Sichtkontakt neu einreihen
+}
 function pump() {
   while (running < MAX_PARALLEL && queue.length) {
-    const ym = queue.shift()!
+    const ym = queue.pop()!
     running++
     fetchMonth(ym).finally(() => {
       running--
@@ -120,7 +129,13 @@ function setSectionRef(ym: string, el: Element | null) {
 function onIntersect(entries: IntersectionObserverEntry[]) {
   for (const e of entries) {
     const ym = (e.target as HTMLElement).dataset.ym
-    if (!ym || !e.isIntersecting) continue
+    if (!ym) continue
+    // Wieder aus der Sichtnähe, bevor die Anfrage lief (z. B. nur vorbeigescrollt)
+    // -> aus der Warteschlange nehmen und weiter beobachten (gallery#5).
+    if (!e.isIntersecting) {
+      unqueue(ym)
+      continue
+    }
     // Einmal in Sichtnaehe gerendert -> bleibt gerendert (kein Entladen =
     // kein Rein/Raus-Flackern beim Scrollen). Danach nicht mehr beobachten.
     // Die reservierte Höhe bleibt, bis die Daten da sind (gallery#3): sonst klappt der
@@ -128,8 +143,6 @@ function onIntersect(entries: IntersectionObserverEntry[]) {
     // ganze Timeline lädt kaskadenartig.
     renderedMap[ym] = true
     loadMonth(ym)
-    const el = sectionEls.get(ym)
-    if (el) observer?.unobserve(el)
   }
 }
 
@@ -173,7 +186,8 @@ function scrollToYm(ym: string) {
   const el = sectionEls.get(ym) as HTMLElement | undefined
   if (!el) return
   const top = el.getBoundingClientRect().top + window.scrollY - 58 // unter den Header
-  window.scrollTo({ top, behavior: 'smooth' })
+  // Sofort springen (gallery#5): smooth über zigtausend Pixel reiht jeden Monat dazwischen ein.
+  window.scrollTo({ top, behavior: 'auto' })
 }
 
 // 6) Lightbox über alle bereits geladenen Bilder (in Monatsreihenfolge).
