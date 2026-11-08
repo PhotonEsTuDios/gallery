@@ -119,6 +119,7 @@ export type FacesAction =
   | { mode: 'reject'; sha: string; face: number }
   | { mode: 'name_face'; sha: string; face: number; person: string }
   | { mode: 'confirm'; cluster: string; person: string; wrong: FaceKey[]; shown: FaceKey[] }
+  | { mode: 'not_person'; sha: string; face: number; person: string } // gallery#16
   | { mode: 'reindex' } // nur Gallery: Personen-Filter neu aufbauen (nach Hintergrund-Speichern)
 export interface FaceKey { sha: string; face: number }
 const MAX_KEYS = 400
@@ -154,6 +155,10 @@ export function validateAction(body: any): FacesAction {
     if (!person) bad('Name fehlt')
     if (wrong && shown) return { mode, cluster, person, wrong, shown }
   }
+  if (mode === 'not_person' && okFace) {
+    if (!person) bad('Name fehlt')
+    return { mode, sha, face, person }
+  }
   if (mode === 'reindex') return { mode }
   return bad('Ungültige Aktion')
 }
@@ -188,7 +193,7 @@ export async function runFacesActions(actions: FacesAction[]) {
     results.push(...(await Promise.all(work.slice(i, i + 8).map((a) => invoke(a, isBig(a))))))
   }
   summary = null // Übersicht neu lesen
-  if (actions.some((a) => !isBig(a))) await rebuildIndex(region, table, bucket) // Personen-Filter sofort aktuell
+  if (actions.some((a) => !isBig(a) && a.mode !== 'not_person')) await rebuildIndex(region, table, bucket) // Personen-Filter sofort aktuell
   return results
 }
 

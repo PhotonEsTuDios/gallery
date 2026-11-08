@@ -16,14 +16,14 @@ export default defineEventHandler(async (event) => {
   if (!named) throw createError({ statusCode: 404, statusMessage: 'Person nicht benannt' })
 
   // bestes Gesicht der Person je Foto (Gesichtsfläche · Score)
-  const best = new Map<string, { area: number; score: number }>()
+  const best = new Map<string, { area: number; score: number; face: number }>()
   for (const c of named.clusters) {
     for (const f of await facesOfCluster(c, 20000)) {
       if (f.person && f.person !== person) continue
       const area = f.box ? f.box[2] * f.box[3] : 0
       const score = f.score ?? 0.9
       const prev = best.get(f.sha)
-      if (!prev || area * score > prev.area * prev.score) best.set(f.sha, { area, score })
+      if (!prev || area * score > prev.area * prev.score) best.set(f.sha, { area, score, face: f.face })
     }
   }
   const bySha = new Map((await getAllPhotos(cfg.awsRegion, cfg.photosTable)).map((p) => [p.sha, p]))
@@ -37,6 +37,6 @@ export default defineEventHandler(async (event) => {
   const shas = suggest(cands, n, seed)
   return {
     person, seed, candidates: cands.length,
-    photos: shas.map((sha) => { const p = bySha.get(sha)!; return { sha, filename: p.filename, taken_at: takenOf(p), kind: p.kind } }),
+    photos: shas.map((sha) => { const p = bySha.get(sha)!; return { sha, face: best.get(sha)!.face, filename: p.filename, taken_at: takenOf(p), kind: p.kind } }),
   }
 })
