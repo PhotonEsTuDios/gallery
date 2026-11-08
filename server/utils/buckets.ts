@@ -1,8 +1,8 @@
 // Timeline-Abschnitte (gallery#11): dünne Monate zu Quartalen oder Jahren zusammenfassen.
-// Regel je Jahr (eine Stufe pro Jahr, damit die Timeline ruhig bleibt):
-//   < YEAR_MIN Fotos im Jahr                         -> ein Abschnitt "2026"
-//   sonst Ø < MONTH_MIN Fotos je belegtem Monat      -> Quartale "2026-Q3"
-//   sonst                                             -> Monate "2026-08"
+// Ziel: keine Mini-Abschnitte (große sind ok). Regel:
+//   Jahr < YEAR_MIN Fotos                                   -> ein Abschnitt "2026"
+//   sonst je Quartal: jeder belegte Monat >= MONTH_MIN      -> Monate "2026-08"
+//                     sonst                                  -> Quartal "2026-Q3"
 // "0000-00" = ohne Datum bleibt eigener Abschnitt.
 export const YEAR_MIN = 30
 export const MONTH_MIN = 15
@@ -12,21 +12,21 @@ export type Span = 'month' | 'quarter' | 'year'
 const MONTHS_DE = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember']
 const MON_SHORT = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez']
 
-/** Stufe je Jahr aus den Monatszahlen ({"2026-08": 18, …}). */
+const quarterOf = (ym: string) => `${ym.slice(0, 4)}-Q${Math.floor((Number(ym.slice(5, 7)) - 1) / 3) + 1}`
+
+/** Plan aus den Monatszahlen ({"2026-08": 18, …}): Jahr -> 'year' bzw. Quartal -> 'month'|'quarter'. */
 export function planSpans(monthCounts: Map<string, number>): Map<string, Span> {
-  const years = new Map<string, { total: number; months: number }>()
+  const years = new Map<string, number>()
+  const thinQ = new Map<string, boolean>()
   for (const [ym, n] of monthCounts) {
     if (ym === '0000-00' || !n) continue
-    const y = ym.slice(0, 4)
-    const s = years.get(y) ?? { total: 0, months: 0 }
-    s.total += n
-    s.months += 1
-    years.set(y, s)
+    years.set(ym.slice(0, 4), (years.get(ym.slice(0, 4)) ?? 0) + n)
+    const q = quarterOf(ym)
+    thinQ.set(q, (thinQ.get(q) ?? false) || n < MONTH_MIN)
   }
   const plan = new Map<string, Span>()
-  for (const [y, s] of years) {
-    plan.set(y, s.total < YEAR_MIN ? 'year' : s.total / s.months < MONTH_MIN ? 'quarter' : 'month')
-  }
+  for (const [y, total] of years) if (total < YEAR_MIN) plan.set(y, 'year')
+  for (const [q, thin] of thinQ) if (!plan.has(q.slice(0, 4))) plan.set(q, thin ? 'quarter' : 'month')
   return plan
 }
 
@@ -34,10 +34,16 @@ export function planSpans(monthCounts: Map<string, number>): Map<string, Span> {
 export function bucketOf(ym: string, plan: Map<string, Span>): string {
   if (ym === '0000-00') return ym
   const y = ym.slice(0, 4)
-  const span = plan.get(y) ?? 'month'
-  if (span === 'year') return y
-  if (span === 'quarter') return `${y}-Q${Math.floor((Number(ym.slice(5, 7)) - 1) / 3) + 1}`
-  return ym
+  if (plan.get(y) === 'year') return y
+  const q = quarterOf(ym)
+  return plan.get(q) === 'quarter' ? q : ym
+}
+
+/** Sortierschlüssel (neueste zuerst absteigend sortieren): Ende des Abschnitts, "2026-Q3" -> "2026-09". */
+export function sortKey(key: string): string {
+  if (key.length === 4) return `${key}-12`
+  if (key.includes('Q')) return `${key.slice(0, 4)}-${String(Number(key.slice(6)) * 3).padStart(2, '0')}`
+  return key
 }
 
 export const KEY_RE = /^(\d{4}|\d{4}-(0\d|1[0-2])|\d{4}-Q[1-4]|0000-00)$/

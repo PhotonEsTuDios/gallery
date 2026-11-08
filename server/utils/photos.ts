@@ -4,7 +4,7 @@ import { gunzipSync, gzipSync } from 'node:zlib'
 import type { H3Event } from 'h3'
 import { ddb, s3, streamToBuffer } from './aws'
 import { assignSessions, takenOf } from './sessions'
-import { bucketLabel, bucketOf, inBucket, planSpans, spanOf, type Span } from './buckets'
+import { bucketLabel, bucketOf, inBucket, planSpans, sortKey, spanOf, type Span } from './buckets'
 import { applyFilter, colorFamily, parseFilter, type Filter, type Origin } from './filter'
 
 // ---- Herkunft (Quelle) -----------------------------------------------------
@@ -335,9 +335,8 @@ export async function getTimelineIndex(region: string, table: string, f?: Filter
     arr.sort(byNewest)
     months.push({ ym: key, label: bucketLabel(key), span: spanOf(key), count: arr.length, cover: (arr.find((p) => p.kind === 'photo') ?? arr[0]).sha })
   }
-  // neueste zuerst; "2026" > "2026-Q4" > "2026-12" stört nicht, weil ein Jahr nur eine Stufe hat.
-  // "Ohne Datum" (0000-00) landet ganz unten.
-  months.sort((a, b) => (a.ym < b.ym ? 1 : a.ym > b.ym ? -1 : 0))
+  // neueste zuerst, Quartal/Jahr nach ihrem letzten Monat einsortiert; "Ohne Datum" (0000-00) ganz unten
+  months.sort((a, b) => { const x = sortKey(a.ym), y = sortKey(b.ym); return x < y ? 1 : x > y ? -1 : 0 })
   return months
 }
 
