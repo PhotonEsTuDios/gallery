@@ -2,12 +2,22 @@
 // Personen-Album-Vorschlag (gallery#15): ~100 portraitartige Fotos, zeitlich gestreut, ohne Überschriften.
 // „Neu mischen“ = neuer Seed (steht in der URL, Neuladen zeigt denselben Vorschlag). Speichern -> Meine Alben.
 interface Photo { sha: string; face: number; filename: string; taken_at: string | null; kind: 'photo' | 'video' }
-interface Suggestion { person: string; seed: number; candidates: number; photos: Photo[] }
+interface Suggestion { person: string; seed: number; mode: Mode; candidates: number; solo: number; photos: Photo[] }
+type Mode = 'entwicklung' | 'portraits'
 
 const route = useRoute()
 const router = useRouter()
 const person = computed(() => String(route.params.name || ''))
 const seed = computed(() => Number(route.query.seed) || 1)
+// Art (gallery#17): Entwicklung (Kinder, am Anfang dichter) | Portraits (Erwachsene), pro Person gemerkt
+const modeKey = computed(() => `person-mode:${person.value}`)
+const mode = computed<Mode>(() => (route.query.mode === 'entwicklung' || route.query.mode === 'portraits' ? route.query.mode : storedMode.value))
+const storedMode = ref<Mode>('portraits')
+function setMode(m: Mode) {
+  try { localStorage.setItem(modeKey.value, m) } catch { /* egal */ }
+  router.replace({ query: { ...route.query, mode: m } })
+  saved.value = null
+}
 const data = shallowRef<Suggestion | null>(null)
 const pending = ref(true)
 const error = ref('')
@@ -17,7 +27,7 @@ async function load(quiet = false) {
   if (!quiet) pending.value = true
   error.value = ''
   try {
-    const r = await $fetch<Suggestion>(`/api/person/${encodeURIComponent(person.value)}/vorschlag`, { query: { seed: seed.value } })
+    const r = await $fetch<Suggestion>(`/api/person/${encodeURIComponent(person.value)}/vorschlag`, { query: { seed: seed.value, mode: mode.value } })
     if (mine === run) data.value = r
   } catch (e: any) {
     if (mine === run) error.value = e?.data?.statusMessage || 'Vorschlag konnte nicht geladen werden'
@@ -25,8 +35,11 @@ async function load(quiet = false) {
     if (mine === run) pending.value = false
   }
 }
-onMounted(load)
-watch([person, seed], load)
+onMounted(() => {
+  try { const m = localStorage.getItem(modeKey.value); if (m === 'entwicklung' || m === 'portraits') storedMode.value = m } catch { /* egal */ }
+  load()
+})
+watch([person, seed, mode], () => load())
 
 function shuffle() {
   router.replace({ query: { ...route.query, seed: String(Math.floor(Math.random() * 2 ** 31)) } })
@@ -38,7 +51,7 @@ const saving = ref(false)
 const albumName = ref('')
 const askName = ref(false)
 const saved = ref<string | null>(null)
-watch(person, (p) => { albumName.value = `${p} – Portraits` }, { immediate: true })
+watch([person, mode], ([p, m]) => { albumName.value = `${p} – ${m === 'entwicklung' ? 'Entwicklung' : 'Portraits'}` }, { immediate: true })
 async function save() {
   if (!data.value) return
   saving.value = true
@@ -54,12 +67,11 @@ async function save() {
   }
 }
 
-// Reihenfolge (Daten kommen älteste zuerst) + Zeitspanne sichtbar machen
-const newestFirst = ref(false)
-const shown = computed(() => (newestFirst.value ? [...(data.value?.photos ?? [])].reverse() : data.value?.photos ?? []))
+// immer von jung nach alt (gallery#17); Zeitspanne sichtbar
+const shown = computed(() => data.value?.photos ?? [])
 const span = computed(() => {
-  const t = (data.value?.photos ?? []).map((p) => p.taken_at?.slice(0, 4)).filter(Boolean) as string[]
-  return t.length ? (newestFirst.value ? `${t.at(-1)} → ${t[0]}` : `${t[0]} → ${t.at(-1)}`) : ''
+  const t = shown.value.map((p) => p.taken_at?.slice(0, 4)).filter(Boolean) as string[]
+  return t.length ? `${t[0]} → ${t.at(-1)}` : ''
 })
 
 // „✕ nicht <Person>“ (gallery#16): Gesicht + Ähnliche raus, Erkennung merkt es sich; Lücke füllt sich nach
@@ -89,10 +101,20 @@ const openIndex = ref<number | null>(null)
     <div class="mb-6 flex flex-wrap items-center gap-3">
       <NuxtLink to="/personen" class="text-neutral-500 transition hover:text-neutral-200">←</NuxtLink>
       <h1 class="text-sm font-medium">{{ person }}</h1>
-      <span v-if="data" class="text-xs text-neutral-500">Album-Vorschlag · {{ data.photos.length }} aus {{ data.candidates.toLocaleString('de-DE') }} Fotos · portraitartig</span>
-      <button v-if="span" class="rounded-full border border-line px-3 py-1 text-xs text-neutral-300 hover:border-neutral-400" data-test="order" :title="newestFirst ? 'auf älteste zuerst umschalten' : 'auf neueste zuerst umschalten'" @click="newestFirst = !newestFirst">
-        {{ span }} · {{ newestFirst ? 'neueste zuerst' : 'älteste zuerst' }} ⇅
-      </button>
+      <div class="flex gap-1 rounded-full border border-line p-0.5 text-xs" data-test="mode">
+        <button
+          v-for="m in (['entwicklung', 'portraits'] as const)"
+          :key="m"
+          :data-test="`mode-${m}`"
+          class="rounded-full px-3 py-1 transition"
+          :class="mode === m ? 'bg-neutral-200 text-black' : 'text-neutral-400 hover:text-neutral-200'"
+          :title="m === 'entwicklung' ? 'Kinder: am Anfang dichter, später lockerer' : 'Erwachsene: gleichmäßig über die Jahre'"
+          @click="setMode(m)"
+        >
+          {{ m === 'entwicklung' ? 'Entwicklung' : 'Portraits' }}
+        </button>
+      </div>
+      <span v-if="data" class="text-xs text-neutral-500" data-test="info">{{ data.photos.length }} Fotos · allein im Bild · {{ span }} (jung → alt)</span>
       <div class="ml-auto flex flex-wrap items-center gap-2">
         <DensityToggle />
         <button data-test="shuffle" class="rounded-full border border-line px-4 py-1.5 text-xs text-neutral-200 hover:border-neutral-400" :disabled="pending" @click="shuffle">↻ Neu mischen</button>

@@ -2,8 +2,12 @@
 // Reine Funktionen (keine AWS-Zugriffe) -> tests/personAlbum.test.ts.
 //
 // Portrait-Wert je Foto:  √(Gesichtsfläche im Bild) · Erkennungs-Score · Gedränge-Abzug · Qualität
-// Auswahl:  Serienbilder (≤ 2 Min) auf das beste reduzieren -> nach Quartal gruppieren ->
-//           Kontingent je Quartal ~ √Anzahl (dichte Phasen dominieren nicht) ->
+// Auswahl:  Serienbilder (≤ 2 Min) auf das beste reduzieren -> nach Zeitraum gruppieren:
+//   portraits:   Quartale, Kontingent ~ √Anzahl (dichte Phasen dominieren nicht)
+//   entwicklung: Alter ab erstem Foto, 0–2 J. Monate / 2–6 J. Quartale / ab 6 J. Halbjahre,
+//                gleiches Kontingent je Zeitraum -> am Anfang dichter (Kinder ändern sich schnell)
+// Allein im Bild stark bevorzugt (SOLO_FACTOR). Ergebnis immer älteste zuerst.
+//
 //           innerhalb: nur die besten KEEP_SHARE, davon gewichtet zufällig (Portrait-Wert³, seed-stabil) -> chronologisch.
 
 export interface Candidate {
@@ -17,12 +21,15 @@ export interface Candidate {
 }
 
 export const BURST_MS = 2 * 60 * 1000
-export const DEFAULT_N = 100
+export const DEFAULT_N = 300
+export const MAX_N = 500
+export type Mode = 'entwicklung' | 'portraits'
+export const SOLO_FACTOR = 0.02 // mehrere Gesichter im Bild: nur Lückenfüller (gallery#17)
 export const KEEP_SHARE = 0.6 // je Zeitraum nur die besten 60 % nach Portrait-Wert (mindestens so viele wie das Kontingent)
 export const WEIGHT_POW = 3 // Gewicht = Portrait-Wert³: große, klare Gesichter deutlich bevorzugt
 
 export function portraitScore(c: Candidate): number {
-  const crowd = 1 / (1 + 0.5 * Math.max(0, c.faces - 1))
+  const crowd = c.faces > 1 ? SOLO_FACTOR / (1 + 0.5 * (c.faces - 2)) : 1
   const quality = c.quality === undefined ? 1 : 0.6 + (0.4 * c.quality) / 100
   return Math.sqrt(Math.max(0, c.area)) * c.score * crowd * quality * (c.blurry ? 0.3 : 1)
 }
@@ -56,14 +63,24 @@ export function dropBursts(cands: Candidate[]): Candidate[] {
 }
 
 const quarterOf = (iso: string) => `${iso.slice(0, 4)}-Q${Math.floor((Number(iso.slice(5, 7)) - 1) / 3) + 1}`
+const monthsBetween = (a: string, b: string) => (Number(b.slice(0, 4)) - Number(a.slice(0, 4))) * 12 + Number(b.slice(5, 7)) - Number(a.slice(5, 7))
 
-/** Kontingente je Gruppe ~ √Größe, Summe = n, keine Gruppe über ihre Größe (Rest wird verteilt). */
-export function quotas(sizes: number[], n: number): number[] {
+/** Entwicklung: Zeitraum nach Alter (Monate seit dem ersten Foto), sortierbar. */
+export function ageBucket(first: string, taken: string): string {
+  const m = Math.max(0, monthsBetween(first, taken))
+  const pad = (x: number) => String(x).padStart(4, '0')
+  if (m < 24) return `a${pad(m)}` // monatlich
+  if (m < 72) return `a${pad(24 + Math.floor((m - 24) / 3) * 3)}` // quartalsweise
+  return `a${pad(72 + Math.floor((m - 72) / 6) * 6)}` // halbjährlich
+}
+
+/** Kontingente je Gruppe ~ √Größe (equal: gleich je Gruppe), Summe = n, keine Gruppe über ihre Größe. */
+export function quotas(sizes: number[], n: number, equal = false): number[] {
   const q = sizes.map(() => 0)
   let left = Math.min(n, sizes.reduce((s, x) => s + x, 0))
   while (left > 0) {
     const open = sizes.map((s, i) => (q[i] < s ? i : -1)).filter((i) => i >= 0)
-    const w = open.map((i) => Math.sqrt(sizes[i]))
+    const w = open.map((i) => (equal ? 1 : Math.sqrt(sizes[i])))
     const W = w.reduce((s, x) => s + x, 0)
     const share = open.map((i, k) => Math.min(sizes[i] - q[i], (left * w[k]) / W))
     let given = 0
@@ -79,17 +96,18 @@ export function quotas(sizes: number[], n: number): number[] {
 }
 
 /** Vorschlag: höchstens n SHAs, chronologisch (älteste zuerst). */
-export function suggest(cands: Candidate[], n = DEFAULT_N, seed = 1): string[] {
-  const pool = dropBursts(cands.filter((c) => c.taken))
+export function suggest(cands: Candidate[], n = DEFAULT_N, seed = 1, mode: Mode = 'portraits'): string[] {
+  const pool = dropBursts(cands.filter((c) => c.taken)) // schon nach Zeit sortiert
+  const first = pool[0]?.taken ?? ''
   const groups = new Map<string, Candidate[]>()
   for (const c of pool) {
-    const k = quarterOf(c.taken)
+    const k = mode === 'entwicklung' ? ageBucket(first, c.taken) : quarterOf(c.taken)
     const g = groups.get(k)
     if (g) g.push(c)
     else groups.set(k, [c])
   }
   const keys = [...groups.keys()].sort()
-  const q = quotas(keys.map((k) => groups.get(k)!.length), n)
+  const q = quotas(keys.map((k) => groups.get(k)!.length), n, mode === 'entwicklung')
   const rand = rng(seed)
   const picked: Candidate[] = []
   keys.forEach((k, i) => {

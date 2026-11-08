@@ -1,7 +1,7 @@
 // Unit-Tests Personen-Alben (gallery#15):  node --test tests/
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { dropBursts, portraitScore, quotas, suggest, type Candidate } from '../server/utils/personAlbum.ts'
+import { ageBucket, dropBursts, portraitScore, quotas, suggest, type Candidate } from '../server/utils/personAlbum.ts'
 
 const c = (sha: string, taken: string, o: Partial<Candidate> = {}): Candidate => ({ sha, taken, area: 0.04, score: 0.9, faces: 1, ...o })
 
@@ -64,10 +64,57 @@ test('gleicher Seed = gleiche Auswahl, anderer Seed = andere', () => {
   const cands = archive()
   assert.deepEqual(suggest(cands, 100, 42), suggest(cands, 100, 42))
   const a = new Set(suggest(cands, 100, 1)), b = suggest(cands, 100, 2)
-  assert.ok(b.filter((x) => !a.has(x)).length > 20)
+  assert.ok(b.filter((x) => !a.has(x)).length >= 8) // Pool hier nur 200 Einzelbilder (gallery#17)
 })
 
 test('ohne Datum fliegt raus, leere Eingabe ok', () => {
   assert.deepEqual(suggest([c('x', '')]), [])
   assert.deepEqual(suggest([]), [])
+})
+
+
+// ---- gallery#17: Entwicklung, allein, 300 ----
+test('Altersstufen: 0–2 J. monatlich, 2–6 J. Quartale, danach Halbjahre', () => {
+  const f = '2011-09-10T00:00:00Z'
+  assert.equal(ageBucket(f, '2011-09-30'), 'a0000')
+  assert.equal(ageBucket(f, '2012-08-01'), 'a0011')
+  assert.equal(ageBucket(f, '2013-09-01'), 'a0024')
+  assert.equal(ageBucket(f, '2013-12-01'), 'a0027')
+  assert.equal(ageBucket(f, '2017-09-01'), 'a0072')
+  assert.equal(ageBucket(f, '2018-02-01'), 'a0072')
+  assert.equal(ageBucket(f, '2018-03-01'), 'a0078')
+})
+
+test('Allein im Bild schlägt Gruppenbild deutlich', () => {
+  assert.ok(portraitScore(c('a', '2020-01-01', { area: 0.01, faces: 1 })) > portraitScore(c('b', '2020-01-01', { area: 0.3, faces: 2 })))
+})
+
+// Kind 2011–2026, jeden Monat 30 Fotos, die Hälfte mit mehreren Gesichtern
+function childArchive(): Candidate[] {
+  const out: Candidate[] = []
+  let i = 0
+  for (let y = 2011; y <= 2025; y++) for (let m = 1; m <= 12; m++) for (let k = 0; k < 30; k++) {
+    out.push(c(`k${i++}`, `${y}-${String(m).padStart(2, '0')}-${String(k + 1).padStart(2, '0')}T10:00:00Z`, { faces: k % 2 ? 3 : 1, area: 0.02 + (k % 7) / 100 }))
+  }
+  return out
+}
+
+test('Entwicklung: 300, älteste zuerst, am Anfang dichter, nur allein', () => {
+  const cands = childArchive()
+  const map = new Map(cands.map((x) => [x.sha, x]))
+  const out = suggest(cands, 300, 9, 'entwicklung').map((s) => map.get(s)!)
+  assert.equal(out.length, 300)
+  assert.ok(out.every((x, i) => i === 0 || x.taken >= out[i - 1].taken))
+  assert.ok(out.every((x) => x.faces === 1), 'nur Einzelbilder, solange genug da sind')
+  const perYear = (y: string) => out.filter((x) => x.taken.startsWith(y)).length
+  assert.ok(perYear('2011') + perYear('2012') > 2 * (perYear('2023') + perYear('2024')), `${perYear('2011')}+${perYear('2012')} vs ${perYear('2023')}+${perYear('2024')}`)
+})
+
+test('Portraits: 300, gleichmäßiger über die Jahre', () => {
+  const cands = childArchive()
+  const map = new Map(cands.map((x) => [x.sha, x]))
+  const out = suggest(cands, 300, 9, 'portraits').map((s) => map.get(s)!)
+  assert.equal(out.length, 300)
+  const perYear = (y: string) => out.filter((x) => x.taken.startsWith(y)).length
+  assert.ok(Math.abs(perYear('2012') - perYear('2024')) <= 3)
 })
