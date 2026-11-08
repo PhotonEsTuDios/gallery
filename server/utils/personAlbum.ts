@@ -4,7 +4,7 @@
 // Portrait-Wert je Foto:  √(Gesichtsfläche im Bild) · Erkennungs-Score · Gedränge-Abzug · Qualität
 // Auswahl:  Serienbilder (≤ 2 Min) auf das beste reduzieren -> nach Quartal gruppieren ->
 //           Kontingent je Quartal ~ √Anzahl (dichte Phasen dominieren nicht) ->
-//           innerhalb gewichtet zufällig (Gewicht = Portrait-Wert², seed-stabil) -> chronologisch.
+//           innerhalb: nur die besten KEEP_SHARE, davon gewichtet zufällig (Portrait-Wert³, seed-stabil) -> chronologisch.
 
 export interface Candidate {
   sha: string
@@ -18,6 +18,8 @@ export interface Candidate {
 
 export const BURST_MS = 2 * 60 * 1000
 export const DEFAULT_N = 100
+export const KEEP_SHARE = 0.6 // je Zeitraum nur die besten 60 % nach Portrait-Wert (mindestens so viele wie das Kontingent)
+export const WEIGHT_POW = 3 // Gewicht = Portrait-Wert³: große, klare Gesichter deutlich bevorzugt
 
 export function portraitScore(c: Candidate): number {
   const crowd = 1 / (1 + 0.5 * Math.max(0, c.faces - 1))
@@ -92,7 +94,9 @@ export function suggest(cands: Candidate[], n = DEFAULT_N, seed = 1): string[] {
   const picked: Candidate[] = []
   keys.forEach((k, i) => {
     // gewichtete Stichprobe ohne Zurücklegen (Efraimidis–Spirakis): Schlüssel u^(1/w), die größten gewinnen
-    const keyed = groups.get(k)!.map((c) => ({ c, key: Math.pow(rand(), 1 / Math.max(1e-6, portraitScore(c) ** 2)) }))
+    const ranked = [...groups.get(k)!].sort((a, b) => portraitScore(b) - portraitScore(a))
+    const top = ranked.slice(0, Math.max(q[i], Math.ceil(ranked.length * KEEP_SHARE)))
+    const keyed = top.map((c) => ({ c, key: Math.pow(rand(), 1 / Math.max(1e-9, portraitScore(c) ** WEIGHT_POW)) }))
     keyed.sort((a, b) => b.key - a.key)
     picked.push(...keyed.slice(0, q[i]).map((x) => x.c))
   })

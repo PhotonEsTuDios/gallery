@@ -57,7 +57,7 @@ test('Vorschlag bevorzugt Portraits', () => {
   const avg = (l: Candidate[]) => l.reduce((s, x) => s + portraitScore(x), 0) / l.length
   const map = new Map(cands.map((x) => [x.sha, x]))
   const out = suggest(cands, 100, 3).map((s) => map.get(s)!)
-  assert.ok(avg(out) > avg(cands) * 1.2, `${avg(out)} vs ${avg(cands)}`)
+  assert.ok(avg(out) > avg(cands) * 1.4, `${avg(out)} vs ${avg(cands)}`)
 })
 
 test('gleicher Seed = gleiche Auswahl, anderer Seed = andere', () => {
