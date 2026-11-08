@@ -44,12 +44,17 @@ await p.waitForSelector('[data-test=groups] img', { timeout: 20000 }).catch(() =
 await p.waitForTimeout(1500)
 ok('Personen-Seite: Gesichter geladen', (await loadedImgs('[data-test=groups] img')) >= 8)
 await p.screenshot({ path: `${OUT}_personen.png` })
-await p.click('[data-test=groups] button:has-text("Prüfen")')
-await p.waitForSelector('[data-test=review] img', { timeout: 20000 }).catch(() => {})
+await p.click('[data-test=groups] [data-test=benennen] >> nth=0')
+await p.waitForSelector('[data-test=review] img', { timeout: 30000 }).catch(() => {})
 await p.waitForTimeout(1500)
-ok('Prüfen-Dialog zeigt Gruppe', (await loadedImgs('[data-test=review] img')) >= 4)
+ok('Benennen-Dialog: Stichprobe 40', (await loadedImgs('[data-test=review] img')) >= 30, `${await loadedImgs('[data-test=review] img')} Bilder`)
+ok('Benennen-Dialog: Namensfeld hat Fokus', await p.evaluate(() => document.activeElement?.getAttribute('data-test') === 'dlg-name'))
+await p.click('[data-test=dlg-save]')
+ok('Speichern ohne Namen -> Hinweis', (await p.locator('[data-test=dlg-error]').textContent())?.includes('Namen'))
 await p.screenshot({ path: `${OUT}_pruefen.png` })
 await p.keyboard.press('Escape')
+const smp = await api(`/api/personen/${per.json.groups[0].cluster}`)
+ok('Stichprobe API', smp.status === 200 && smp.json.faces.length === 40 && smp.json.next === 40)
 
 // --- #8 Filter ---
 const all = await api('/api/timeline')
@@ -91,6 +96,25 @@ if (process.env.WRITE === '1') {
   const undo = await post('/api/personen', { actions: [{ mode: 'name_face', sha: face.sha, face: face.face, person: '' }] })
   ok('Testname wieder entfernt', undo.status === 200 && !((await api('/api/personen/namen')).json || []).some((n) => n.name === TEST))
   ok('Ungültige Aktion abgelehnt', (await post('/api/personen', { actions: [{ mode: 'drop_table' }] })).status === 400)
+  // gallery#10: Gruppe über den Dialog benennen (kleinste geladene Gruppe), danach wieder entnennen
+  const small = per.json.groups[per.json.groups.length - 1]
+  await p.goto(BASE + '/personen', { waitUntil: 'networkidle' })
+  await p.locator('[data-test=groups] [data-test=benennen]').last().click()
+  await p.waitForSelector('[data-test=review] img', { timeout: 30000 })
+  await p.click('[data-test=dlg-name]')
+  await p.keyboard.type(TEST, { delay: 10 })
+  await p.locator('[data-test=review] .grid button').first().click() // eins als „nicht die Person“
+  await p.click('[data-test=dlg-save]')
+  await p.waitForSelector('[data-test=notice]', { timeout: 60000 }).catch(() => {})
+  const note = (await p.locator('[data-test=notice]').textContent().catch(() => '')) || ''
+  ok('Dialog: speichern mit Rückmeldung', note.includes(TEST), note.trim())
+  ok('Dialog: Name unter „Benannt“', (await p.locator(`[data-test=named] >> text=${TEST}`).count()) > 0)
+  await p.screenshot({ path: `${OUT}_gespeichert.png` })
+  ok('Name aus Dialog in Filter-Liste', ((await api('/api/personen/namen')).json || []).some((n) => n.name === TEST))
+  const undo2 = await post('/api/personen', { actions: [{ mode: 'name', cluster: small.cluster, person: '' }] })
+  ok('Dialog-Test zurückgenommen', undo2.status === 200 && !((await api('/api/personen/namen')).json || []).some((n) => n.name === TEST))
+  ok('confirm ohne Namen abgelehnt', (await post('/api/personen', { actions: [{ mode: 'confirm', cluster: small.cluster, person: '', wrong: [], shown: [] }] })).status === 400)
+  ok('confirm mit kaputten Schlüsseln abgelehnt', (await post('/api/personen', { actions: [{ mode: 'confirm', cluster: small.cluster, person: 'X', wrong: [{ sha: 'x', face: 0 }], shown: [] }] })).status === 400)
   ok('Name mit Komma abgelehnt', (await post('/api/personen', { actions: [{ mode: 'name_face', sha: face.sha, face: face.face, person: 'a,b' }] })).status === 400)
 }
 

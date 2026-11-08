@@ -116,6 +116,21 @@ export type FacesAction =
   | { mode: 'hide'; cluster: string }
   | { mode: 'reject'; sha: string; face: number }
   | { mode: 'name_face'; sha: string; face: number; person: string }
+  | { mode: 'confirm'; cluster: string; person: string; wrong: FaceKey[]; shown: FaceKey[] }
+  | { mode: 'reindex' } // nur Gallery: Personen-Filter neu aufbauen (nach Hintergrund-Speichern)
+export interface FaceKey { sha: string; face: number }
+const MAX_KEYS = 400
+
+function faceKeys(list: unknown): FaceKey[] | null {
+  if (!Array.isArray(list) || list.length > MAX_KEYS) return null
+  const out: FaceKey[] = []
+  for (const k of list as any[]) {
+    const sha = String(k?.sha ?? ''), face = Number(k?.face)
+    if (!/^[a-f0-9]{64}$/.test(sha) || !Number.isInteger(face) || face < 0 || face >= 1000) return null
+    out.push({ sha, face })
+  }
+  return out
+}
 
 /** Prüft Eingaben aus dem Browser, bevor sie an die Lambda gehen. */
 export function validateAction(body: any): FacesAction {
@@ -132,6 +147,12 @@ export function validateAction(body: any): FacesAction {
   if (mode === 'hide' && okCluster) return { mode, cluster }
   if (mode === 'reject' && okFace) return { mode, sha, face }
   if (mode === 'name_face' && okFace) return { mode, sha, face, person }
+  if (mode === 'confirm' && okCluster) {
+    const wrong = faceKeys(body?.wrong), shown = faceKeys(body?.shown)
+    if (!person) bad('Name fehlt')
+    if (wrong && shown) return { mode, cluster, person, wrong, shown }
+  }
+  if (mode === 'reindex') return { mode }
   return bad('Ungültige Aktion')
 }
 
@@ -160,10 +181,20 @@ export async function runFacesActions(actions: FacesAction[]) {
   const sizes = new Map((await getClusters()).clusters.map((c) => [c.cluster, c.size]))
   const isBig = (a: FacesAction) => 'cluster' in a && (sizes.get(a.cluster) ?? 0) > BIG
   const results: unknown[] = []
-  for (let i = 0; i < actions.length; i += 8) {
-    results.push(...(await Promise.all(actions.slice(i, i + 8).map((a) => invoke(a, isBig(a))))))
+  const work = actions.filter((a) => a.mode !== 'reindex')
+  for (let i = 0; i < work.length; i += 8) {
+    results.push(...(await Promise.all(work.slice(i, i + 8).map((a) => invoke(a, isBig(a))))))
   }
   summary = null // Übersicht neu lesen
   if (actions.some((a) => !isBig(a))) await rebuildIndex(region, table, bucket) // Personen-Filter sofort aktuell
   return results
+}
+
+/** Stichprobe zum Prüfen (gallery#10): Ausreißer zuerst, gerechnet in photon-faces (dort liegen die Vektoren). */
+export async function sampleCluster(cluster: string, offset = 0) {
+  const r = await invoke({ mode: 'sample', cluster, offset } as any)
+  return {
+    cluster, size: r.size as number, next: r.next as number | null,
+    faces: (r.faces as any[]).map((f) => ({ sha: f.sha, face: f.face, sim: f.sim, crop: cropId(f.crop) })),
+  }
 }

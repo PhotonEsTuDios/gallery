@@ -1,10 +1,9 @@
 <script setup lang="ts">
 // Personen benennen (gallery#7): Gruppen aus der Gesichtserkennung (staubsauger#14).
-// Benennen = Name an alle Gesichter der Gruppe; Zusammenführen = zweite Gruppe gleich benennen.
+// Benennen (gallery#10): Gruppe anklicken -> Name -> falsche anklicken -> Speichern. Gleicher Name = zusammengeführt.
 interface Group { cluster: string; size: number; photos: number; person: string | null; samples: string[] }
 interface Named { person: string; clusters: string[]; size: number; photos: number; samples: string[] }
 interface Page { generated_at?: string; named: Named[]; groups: Group[]; total: number; next: number | null }
-interface Face { sha: string; face: number; crop: string; person?: string }
 
 const named = ref<Named[]>([])
 const groups = ref<Group[]>([])
@@ -34,7 +33,7 @@ async function load(reset = false) {
   }
 }
 function onKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') review.value = null
+  if (e.key === 'Escape' && dlg.value) closeDialog()
 }
 onMounted(() => {
   load(true)
@@ -56,18 +55,6 @@ async function act(cluster: string, label: string, actions: Record<string, unkno
   }
 }
 
-const input = reactive<Record<string, string>>({})
-async function nameGroup(g: Group) {
-  const person = (input[g.cluster] || '').trim()
-  if (!person) return
-  if (await act(g.cluster, 'speichert…', [{ mode: 'name', cluster: g.cluster, person }])) {
-    groups.value = groups.value.filter((x) => x.cluster !== g.cluster)
-    total.value--
-    const n = named.value.find((x) => x.person === person)
-    if (n) { n.clusters.push(g.cluster); n.size += g.size; n.photos += g.photos }
-    else named.value.unshift({ person, clusters: [g.cluster], size: g.size, photos: g.photos, samples: g.samples.slice(0, 4) })
-  }
-}
 async function hideGroup(g: Group) {
   if (await act(g.cluster, 'blendet aus…', [{ mode: 'hide', cluster: g.cluster }])) {
     groups.value = groups.value.filter((x) => x.cluster !== g.cluster)
@@ -75,27 +62,75 @@ async function hideGroup(g: Group) {
   }
 }
 
-// Prüfen: alle Gesichter einer Gruppe, falsche markieren und entfernen
-const review = ref<{ group: Group; faces: Face[]; wrong: Set<string> } | null>(null)
-async function openReview(g: Group) {
-  review.value = { group: g, faces: [], wrong: new Set() }
-  const r = await $fetch<{ faces: Face[] }>(`/api/personen/${g.cluster}`)
-  if (review.value?.group.cluster === g.cluster) review.value.faces = r.faces
+// Benennen (gallery#10): Name eintragen -> wer NICHT die Person ist anklicken -> Speichern.
+// Gezeigt wird eine Stichprobe (40, wahrscheinlich falsche zuerst); Ähnliche im Rest nimmt photon-faces mit raus.
+interface Sample { sha: string; face: number; crop: string }
+const key = (f: { sha: string; face: number }) => `${f.sha}_${f.face}`
+const dlg = ref<{ group: Group; person: string; faces: Sample[]; wrong: Set<string>; next: number | null; loading: boolean; error: string } | null>(null)
+const notice = ref('')
+async function openDialog(g: Group) {
+  dlg.value = { group: g, person: '', faces: [], wrong: new Set(), next: 0, loading: false, error: '' }
+  await nextTick()
+  ;(document.querySelector('[data-test=dlg-name]') as HTMLInputElement | null)?.focus()
+  await more()
 }
-function toggleWrong(f: Face) {
-  const w = review.value!.wrong
-  const k = `${f.sha}_${f.face}`
-  w.has(k) ? w.delete(k) : w.add(k)
-}
-async function removeWrong() {
-  const r = review.value!
-  const actions = r.faces.filter((f) => r.wrong.has(`${f.sha}_${f.face}`)).map((f) => ({ mode: 'reject', sha: f.sha, face: f.face }))
-  for (let i = 0; i < actions.length; i += 50) {
-    if (!(await act(r.group.cluster, 'entfernt…', actions.slice(i, i + 50)))) return
+async function more() {
+  const d = dlg.value
+  if (!d || d.loading || d.next === null) return
+  d.loading = true
+  try {
+    const r = await $fetch<{ faces: Sample[]; next: number | null }>(`/api/personen/${d.group.cluster}`, { query: { offset: d.next } })
+    if (dlg.value !== d) return
+    d.faces = d.faces.concat(r.faces)
+    d.next = r.next
+  } catch (e: any) {
+    d.error = e?.data?.statusMessage || 'Gesichter laden fehlgeschlagen'
+  } finally {
+    d.loading = false
   }
-  r.faces = r.faces.filter((f) => !r.wrong.has(`${f.sha}_${f.face}`))
-  r.group.size = r.faces.length
-  r.wrong = new Set()
+}
+function toggle(f: Sample) {
+  const w = dlg.value!.wrong
+  w.has(key(f)) ? w.delete(key(f)) : w.add(key(f))
+}
+function closeDialog() {
+  const d = dlg.value
+  if (d && (d.wrong.size || d.person.trim()) && !busy[d.group.cluster] && !confirm('Nicht gespeichert — wirklich schließen?')) return
+  dlg.value = null
+}
+async function saveDialog() {
+  const d = dlg.value
+  if (!d) return
+  const person = d.person.trim()
+  if (!person) { d.error = 'Bitte zuerst den Namen eintragen'; return }
+  const g = d.group
+  const wrong = d.faces.filter((f) => d.wrong.has(key(f))).map(({ sha, face }) => ({ sha, face }))
+  const shown = d.faces.map(({ sha, face }) => ({ sha, face }))
+  busy[g.cluster] = 'speichert…'
+  d.error = ''
+  try {
+    const r = await postSigned<{ results: any[] }>('/api/personen', { actions: [{ mode: 'confirm', cluster: g.cluster, person, wrong, shown }] })
+    const res = r.results?.[0] ?? {}
+    groups.value = groups.value.filter((x) => x.cluster !== g.cluster)
+    total.value--
+    const n = named.value.find((x) => x.person === person)
+    const size = res.queued ? g.size - wrong.length : res.faces
+    const photos = res.queued ? g.photos : res.photos
+    if (n) { n.clusters.push(g.cluster); n.size += size; n.photos += photos }
+    else named.value.unshift({ person, clusters: [g.cluster], size, photos, samples: g.samples.slice(0, 4) })
+    if (res.queued) {
+      notice.value = `✓ ${person} gespeichert — große Gruppe, wird im Hintergrund übernommen (ca. 1 Min.)`
+      setTimeout(() => postSigned('/api/personen', { actions: [{ mode: 'reindex' }] }).catch(() => {}), 60_000)
+    } else {
+      const out = (res.removed || 0) + (res.auto_removed || 0)
+      notice.value = `✓ ${person}: ${res.faces} Gesichter auf ${res.photos} Fotos` + (out ? ` · ${res.removed} markierte + ${res.auto_removed} ähnliche entfernt` : '')
+    }
+    dlg.value = null
+  } catch (e: any) {
+    d.error = e?.data?.statusMessage || e?.statusMessage || 'Speichern fehlgeschlagen — bitte nochmal'
+  } finally {
+    delete busy[g.cluster]
+  }
 }
 
 const names = computed(() => named.value.map((n) => n.person))
@@ -137,31 +172,23 @@ const when = computed(() => (generatedAt.value ? new Date(generatedAt.value).toL
         Wer ist das? <span class="text-xs text-neutral-500">{{ total }} Gruppen, größte zuerst</span>
       </h2>
       <p class="mb-4 text-xs text-neutral-500">
-        Namen eintippen + Enter. Gleicher Name bei zwei Gruppen = zusammengeführt. „Prüfen“ zeigt alle Gesichter, falsche lassen sich entfernen.
+        Gruppe anklicken → Namen eintragen → wer <b>nicht</b> die Person ist anklicken → Speichern. Gleicher Name bei zwei Gruppen = zusammengeführt.
       </p>
+      <p v-if="notice" class="mb-4 rounded-md border border-emerald-700/60 bg-emerald-900/20 px-3 py-2 text-sm text-emerald-300" data-test="notice">{{ notice }}</p>
       <p v-if="!loading && !groups.length && !named.length" class="text-sm text-neutral-500">Noch keine Gruppen — die Gesichtserkennung gruppiert täglich um 06:00 UTC.</p>
 
       <datalist id="person-names"><option v-for="n in names" :key="n" :value="n" /></datalist>
       <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" data-test="groups">
         <div v-for="g in groups" :key="g.cluster" class="overflow-hidden rounded-xl border border-line" :class="busy[g.cluster] ? 'opacity-50' : ''">
-          <div class="grid grid-cols-2">
+          <button class="grid w-full grid-cols-2" title="Benennen" @click="openDialog(g)">
             <img v-for="s in g.samples.slice(0, 4)" :key="s" :src="crop(s)" alt="" loading="lazy" class="aspect-square w-full object-cover" />
-          </div>
+          </button>
           <div class="space-y-2 p-2">
             <div class="text-xs text-neutral-500">{{ g.photos }} Fotos · {{ g.size }} Gesichter</div>
-            <form @submit.prevent="nameGroup(g)">
-              <input
-                v-model="input[g.cluster]"
-                list="person-names"
-                placeholder="Name…"
-                :disabled="!!busy[g.cluster]"
-                class="w-full rounded-md border border-line bg-transparent px-2 py-1 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none"
-              />
-            </form>
-            <div class="flex justify-between text-xs">
-              <button class="text-neutral-400 hover:text-neutral-100" @click="openReview(g)">Prüfen</button>
+            <div class="flex items-center justify-between text-xs">
+              <button class="rounded-full border border-line px-3 py-1 text-neutral-200 hover:border-neutral-400" data-test="benennen" @click="openDialog(g)">Wer ist das?</button>
               <span v-if="busy[g.cluster]" class="text-neutral-500">{{ busy[g.cluster] }}</span>
-              <button class="text-neutral-500 hover:text-neutral-200" title="Fremde, Publikum: nicht mehr zeigen" @click="hideGroup(g)">Ausblenden</button>
+              <button v-else class="text-neutral-500 hover:text-neutral-200" title="Fremde, Publikum: nicht mehr zeigen" @click="hideGroup(g)">Ausblenden</button>
             </div>
           </div>
         </div>
@@ -173,36 +200,54 @@ const when = computed(() => (generatedAt.value ? new Date(generatedAt.value).toL
       </div>
     </section>
 
-    <!-- Prüfen-Dialog -->
+    <!-- Benennen-Dialog (gallery#10) -->
     <Teleport to="body">
-      <div v-if="review" class="fixed inset-0 z-50 overflow-y-auto bg-black/95 p-5" data-test="review" @click.self="review = null">
+      <div v-if="dlg" class="fixed inset-0 z-50 overflow-y-auto bg-black/95 p-5" data-test="review" @click.self="closeDialog">
         <div class="mx-auto max-w-6xl">
-          <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 class="text-sm text-neutral-300">
-              Gruppe {{ review.group.cluster }} · {{ review.faces.length }} Gesichter — falsche anklicken
-            </h2>
-            <div class="flex items-center gap-3 text-xs">
+          <div class="sticky top-0 z-10 -mx-5 mb-4 space-y-3 bg-black/95 px-5 py-3">
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="text-xs text-neutral-500">1. Wer ist das?</span>
+              <input
+                v-model="dlg.person"
+                data-test="dlg-name"
+                list="person-names"
+                placeholder="Name…"
+                autocomplete="off"
+                class="min-w-0 flex-1 rounded-md border border-line bg-transparent px-3 py-2 text-base text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-400 focus:outline-none sm:max-w-xs"
+                @keydown.enter.prevent
+              />
               <button
-                class="rounded-full border px-4 py-1.5 transition"
-                :class="review.wrong.size ? 'border-red-400 text-red-300 hover:bg-red-400/10' : 'border-line text-neutral-600'"
-                :disabled="!review.wrong.size || !!busy[review.group.cluster]"
-                @click="removeWrong"
+                data-test="dlg-save"
+                class="rounded-full px-5 py-2 text-sm font-medium transition"
+                :class="dlg.person.trim() ? 'bg-neutral-100 text-black hover:bg-white' : 'bg-neutral-800 text-neutral-500'"
+                :disabled="!!busy[dlg.group.cluster]"
+                @click="saveDialog"
               >
-                {{ busy[review.group.cluster] || `${review.wrong.size} entfernen` }}
+                {{ busy[dlg.group.cluster] || (dlg.person.trim() ? `Speichern${dlg.wrong.size ? ` · ${dlg.wrong.size} ausnehmen` : ''}` : 'Speichern') }}
               </button>
-              <button class="text-neutral-400 hover:text-white" @click="review = null">✕ schließen</button>
+              <button class="ml-auto text-xs text-neutral-400 hover:text-white" @click="closeDialog">✕ schließen</button>
             </div>
+            <p class="text-xs text-neutral-400">
+              2. Anklicken, wer <b>nicht</b> {{ dlg.person.trim() || 'die Person' }} ist. Gezeigt: {{ dlg.faces.length }} von {{ dlg.group.size }}, unsichere zuerst. Ähnliche im Rest nimmt die Erkennung beim Speichern automatisch mit raus.
+            </p>
+            <p v-if="dlg.error" class="text-sm text-red-400" data-test="dlg-error">{{ dlg.error }}</p>
           </div>
-          <p v-if="!review.faces.length" class="text-sm text-neutral-500">Lade…</p>
-          <div class="grid grid-cols-5 gap-2 sm:grid-cols-8 lg:grid-cols-12">
+          <p v-if="!dlg.faces.length && dlg.loading" class="text-sm text-neutral-500">Lade…</p>
+          <div class="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-10">
             <button
-              v-for="f in review.faces"
-              :key="`${f.sha}_${f.face}`"
+              v-for="f in dlg.faces"
+              :key="key(f)"
               class="relative overflow-hidden rounded-md border-2 transition"
-              :class="review.wrong.has(`${f.sha}_${f.face}`) ? 'border-red-400 opacity-40' : 'border-transparent hover:border-neutral-500'"
-              @click="toggleWrong(f)"
+              :class="dlg.wrong.has(key(f)) ? 'border-red-500' : 'border-transparent hover:border-neutral-500'"
+              @click="toggle(f)"
             >
-              <img :src="`/face/${f.crop}`" alt="" loading="lazy" class="aspect-square w-full object-cover" />
+              <img :src="`/face/${f.crop}`" alt="" loading="lazy" class="aspect-square w-full object-cover" :class="dlg.wrong.has(key(f)) ? 'opacity-30' : ''" />
+              <span v-if="dlg.wrong.has(key(f))" class="absolute inset-0 flex items-center justify-center text-3xl font-bold text-red-500">✕</span>
+            </button>
+          </div>
+          <div class="mt-5 text-center">
+            <button v-if="dlg.next !== null" class="rounded-full border border-line px-4 py-2 text-xs text-neutral-300 hover:border-neutral-500" :disabled="dlg.loading" @click="more">
+              {{ dlg.loading ? 'Lade…' : 'Mehr zeigen' }}
             </button>
           </div>
         </div>
