@@ -100,6 +100,9 @@ function open(i: number) {
   lightboxList.value = [...shown.value]
   openIndex.value = i
 }
+
+// Vorschaugröße XS…XL, gemeinsam mit allen Ansichten (gallery#14)
+const { cell, thumbW, gridStyle } = useDensity()
 </script>
 
 <template>
@@ -150,11 +153,12 @@ function open(i: number) {
         <label class="flex cursor-pointer items-center gap-2"><input v-model="hideBlurry" type="checkbox" /> Unscharfe ausblenden</label>
         <label class="flex cursor-pointer items-center gap-2"><input v-model="hidePicked" type="checkbox" /> Schon gewählte ausblenden</label>
         <span class="text-neutral-500">{{ shown.length }} sichtbar · Bild öffnen, dann 1–4 für die Säule</span>
+        <DensityToggle class="ml-auto" />
       </div>
 
       <section v-for="g in groups" :key="g.label" class="mb-6">
         <h2 class="mb-2 text-xs uppercase tracking-[0.15em] text-neutral-500">{{ g.label }}</h2>
-        <div class="grid gap-1" style="grid-template-columns: repeat(auto-fill, minmax(140px, 1fr))">
+        <div :style="gridStyle" data-test="grid">
           <button
             v-for="{ p, i } in g.items"
             :key="p.sha"
@@ -162,13 +166,13 @@ function open(i: number) {
             @click="open(i)"
           >
             <img
-              :src="p.kind === 'video' ? `/poster/${p.sha}` : `/img/${p.sha}?w=400`"
+              :src="p.kind === 'video' ? `/poster/${p.sha}` : `/img/${p.sha}?w=${thumbW}`"
               :alt="p.filename"
               loading="lazy"
               class="h-full w-full object-cover transition duration-300 group-hover:opacity-90"
             />
             <span
-              v-if="pillarLabel(p.sha)"
+              v-if="pillarLabel(p.sha) && cell >= 78"
               class="absolute left-1 top-1 rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-black"
             >
               {{ pillarLabel(p.sha) }}

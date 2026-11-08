@@ -29,13 +29,19 @@ function open(i: number) {
   lightboxList.value = [...shown.value]
   openIndex.value = i
 }
+
+// Vorschaugröße XS…XL, gemeinsam mit allen Ansichten (gallery#14)
+const { thumbW, gridStyle } = useDensity()
 </script>
 
 <template>
   <div class="mx-auto max-w-7xl px-5 py-8">
     <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
       <h1 class="text-sm uppercase tracking-[0.2em] text-neutral-500">Auswahl</h1>
-      <span class="text-xs text-neutral-500">{{ total }} {{ total === 1 ? 'Bild' : 'Bilder' }} gewählt</span>
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-neutral-500">{{ total }} {{ total === 1 ? 'Bild' : 'Bilder' }} gewählt</span>
+        <DensityToggle />
+      </div>
     </div>
 
     <div class="mb-3 flex w-fit flex-wrap gap-1 rounded-full border border-line p-1">
@@ -61,7 +67,7 @@ function open(i: number) {
       Nochmal dieselbe Säule oder 0 nimmt es wieder raus.
     </div>
 
-    <div v-else class="grid gap-1" style="grid-template-columns: repeat(auto-fill, minmax(160px, 1fr))">
+    <div v-else :style="gridStyle" data-test="grid">
       <button
         v-for="(p, i) in shown"
         :key="p.sha"
@@ -69,7 +75,7 @@ function open(i: number) {
         @click="open(i)"
       >
         <img
-          :src="p.kind === 'video' ? `/poster/${p.sha}` : `/img/${p.sha}?w=400`"
+          :src="p.kind === 'video' ? `/poster/${p.sha}` : `/img/${p.sha}?w=${thumbW}`"
           :alt="p.filename"
           loading="lazy"
           class="h-full w-full object-cover transition duration-300 group-hover:opacity-90"

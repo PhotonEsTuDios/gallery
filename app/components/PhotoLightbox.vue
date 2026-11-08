@@ -14,6 +14,10 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:index': [number | null] }>()
 
 const current = computed(() => (props.index === null ? null : props.photos[props.index] ?? null))
+// gallery#14: Tasten +/− der Größenwahl ruhen, solange die Lightbox offen ist
+const lightboxOpen = useLightboxOpen()
+watch(() => props.index, (i) => { lightboxOpen.value = i !== null }, { immediate: true })
+onUnmounted(() => { lightboxOpen.value = false })
 const isVideo = computed(() => current.value?.kind === 'video')
 
 // Video: presigned URL on demand laden

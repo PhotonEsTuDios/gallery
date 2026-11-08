@@ -60,13 +60,19 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'blurry', label: '🗑️ Unscharf' },
   { key: 'color', label: '🎨 Farbe' },
 ]
+
+// Vorschaugröße XS…XL, gemeinsam mit allen Ansichten (gallery#14)
+const { cell, thumbW, gridStyle } = useDensity()
 </script>
 
 <template>
   <div class="mx-auto max-w-7xl px-5 py-8">
     <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
       <h1 class="text-sm uppercase tracking-[0.2em] text-neutral-500">Labels</h1>
-      <span v-if="data" class="text-xs text-neutral-500">{{ data.count.toLocaleString('de-DE') }} gelabelt</span>
+      <div class="flex items-center gap-3">
+        <span v-if="data" class="text-xs text-neutral-500">{{ data.count.toLocaleString('de-DE') }} gelabelt</span>
+        <DensityToggle />
+      </div>
     </div>
 
     <!-- Tabs -->
@@ -103,8 +109,8 @@ const TABS: { key: Tab; label: string }[] = [
 
     <div
       v-else
-      class="grid gap-1"
-      style="grid-template-columns: repeat(auto-fill, minmax(120px, 1fr))"
+      :style="gridStyle"
+      data-test="grid"
     >
       <button
         v-for="(p, i) in shown"
@@ -113,20 +119,20 @@ const TABS: { key: Tab; label: string }[] = [
         @click="open(i)"
       >
         <img
-          :src="`/img/${p.sha}?w=400`"
+          :src="`/img/${p.sha}?w=${thumbW}`"
           :alt="p.filename"
           loading="lazy"
           class="h-full w-full object-cover transition duration-300 group-hover:opacity-90"
         />
         <!-- Score-/Farb-Badge -->
         <div
-          v-if="tab !== 'color'"
+          v-if="tab !== 'color' && cell >= 78"
           class="absolute right-1 top-1 rounded bg-black/65 px-1.5 py-0.5 text-[10px] font-medium tabular-nums backdrop-blur"
           :class="p.blurry ? 'text-red-300' : 'text-neutral-200'"
         >
           {{ p.quality }}
         </div>
-        <div v-else class="absolute right-1 top-1 flex gap-0.5">
+        <div v-else-if="tab === 'color'" class="absolute right-1 top-1 flex gap-0.5">
           <span
             v-for="c in p.colors.slice(0, 3)"
             :key="c"

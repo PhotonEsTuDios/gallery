@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { GRID_GAP } from '~/composables/useDensity'
 interface TimelineMonth {
   ym: string // Abschnitt: 2026-08 / 2026-Q3 / 2026 (gallery#11)
   label: string
@@ -73,37 +74,8 @@ async function fetchMonth(ym: string) {
   }
 }
 
-// --- Dichte (XS…XL, gallery#13): steuert die Spaltenzahl = Bildgröße ------------
-const DENSITIES = ['XS', 'S', 'M', 'L', 'XL'] as const
-type Density = (typeof DENSITIES)[number]
-const CELL_TARGET: Record<Density, number> = { XS: 48, S: 78, M: 120, L: 200, XL: 400 } // Ziel-Kachelbreite px
-const DENSITY_TITLE: Record<Density, string> = {
-  XS: 'winzig – ganzes Jahr auf einen Blick', S: 'klein – ganzer Monat auf einen Blick', M: 'mittel', L: 'groß', XL: 'sehr groß',
-}
-const density = ref<Density>('L')
-// Thumbnail-Breite zur Kachel (Retina ≈ 2×): bis 78 px reicht w=200, bis 200 px w=400, XL w=800.
-const thumbW = computed(() => (CELL_TARGET[density.value] <= 78 ? 200 : CELL_TARGET[density.value] <= 200 ? 400 : 800))
-function stepDensity(d: number) {
-  const i = DENSITIES.indexOf(density.value) + d
-  if (i >= 0 && i < DENSITIES.length) density.value = DENSITIES[i]
-}
-// Tasten + / − (auch = und _ ohne Umschalt, Ziffernblock) — nicht in Eingabefeldern, nicht bei offener Lightbox
-function onDensityKey(e: KeyboardEvent) {
-  if (e.metaKey || e.ctrlKey || e.altKey || openIndex.value !== null) return
-  const t = e.target as HTMLElement | null
-  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
-  if (e.key === '+' || e.key === '=') stepDensity(1)
-  else if (e.key === '-' || e.key === '_') stepDensity(-1)
-  else return
-  e.preventDefault()
-}
-onMounted(() => {
-  const saved = localStorage.getItem('tl-density') as Density | null
-  if (saved && (DENSITIES as readonly string[]).includes(saved)) density.value = saved
-  window.addEventListener('keydown', onDensityKey)
-})
-onUnmounted(() => window.removeEventListener('keydown', onDensityKey))
-watch(density, (d) => localStorage.setItem('tl-density', d))
+// --- Vorschaugröße XS…XL: gemeinsam für alle Ansichten (useDensity, gallery#14) ---
+const { cell, thumbW } = useDensity()
 
 // --- Foto/Video-Filter ---
 type Kind = 'all' | 'photo' | 'video'
@@ -119,11 +91,11 @@ function shownIn(ym: string): Photo[] {
 //    Scrollbalken sofort korrekt ist und nichts springt.
 const containerRef = ref<HTMLElement | null>(null)
 const containerWidth = ref(1024)
-const GAP = 4
+const GAP = GRID_GAP
 const HEADER_H = 52
 
 function cols(): number {
-  const t = CELL_TARGET[density.value]
+  const t = cell.value
   return Math.max(2, Math.floor((containerWidth.value + GAP) / (t + GAP)))
 }
 function sectionHeight(m: TimelineMonth): number {
@@ -245,20 +217,8 @@ function open(sha: string) {
         </button>
       </div>
       <span class="h-4 w-px bg-line" />
-      <!-- Dichte -->
-      <div class="flex items-center gap-1">
-        <button
-          v-for="d in DENSITIES"
-          :key="d"
-          :data-test="`density-${d}`"
-          class="h-7 w-8 rounded-full text-xs transition"
-          :class="density === d ? 'bg-neutral-200 text-black' : 'text-neutral-400 hover:text-neutral-200'"
-          :title="`${DENSITY_TITLE[d]} (Tasten + / −)`"
-          @click="density = d"
-        >
-          {{ d }}
-        </button>
-      </div>
+      <!-- Größe XS…XL (+/−) -->
+      <DensityToggle bare />
     </div>
 
     <p v-if="pending" class="text-sm text-neutral-500">Lade…</p>

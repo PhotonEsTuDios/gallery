@@ -15,7 +15,7 @@ const state = () => p.evaluate(() => {
   const cols = g ? getComputedStyle(g).gridTemplateColumns.split(' ').length : 0
   const im = [...document.querySelectorAll('section[data-ym] img')].filter((i) => { const r = i.getBoundingClientRect(); return r.top >= 0 && r.top < innerHeight })
   const w = im[0] ? new URL(im[0].src).searchParams.get('w') : null
-  return { cols, w, vis: im.length, done: im.filter((i) => i.complete && i.naturalWidth).length, sel: localStorage.getItem('tl-density') }
+  return { cols, w, vis: im.length, done: im.filter((i) => i.complete && i.naturalWidth).length, sel: localStorage.getItem('density') }
 })
 const res = {}
 for (const d of ['XS', 'S', 'M', 'L', 'XL']) {
