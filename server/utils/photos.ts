@@ -306,6 +306,10 @@ export interface TimelineMonth {
   cover: string // sha des Titelbilds (jüngstes des Monats)
 }
 
+function ymOf(p: Photo): string {
+  return (takenOf(p) || '').slice(0, 7) || '0000-00'
+}
+
 // Innerhalb eines Monats: jüngste Aufnahme zuerst, dann Dateiname.
 function byNewest(a: Photo, b: Photo): number {
   const ta = takenOf(a) ?? a.uploaded_at, tb = takenOf(b) ?? b.uploaded_at
