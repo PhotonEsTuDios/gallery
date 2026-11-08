@@ -40,8 +40,8 @@ ok('Auswahl bleibt nach Neuladen', (await state()).sel === 'S')
 await p.click('[data-test=density-XS]'); await p.waitForTimeout(1500)
 const t0 = Date.now()
 for (let i = 0; i < 8; i++) { await p.mouse.wheel(0, 900); await p.waitForTimeout(250) }
-await p.waitForTimeout(4000)
-const xs = await state()
+let xs = await state()
+for (let i = 0; i < 15 && !(xs.vis > 50 && xs.done >= xs.vis * 0.8); i++) { await p.waitForTimeout(1000); xs = await state() } // neue Monate: erst Daten, dann Bilder
 ok('XS: nach schnellem Scrollen Bilder da', xs.done >= xs.vis * 0.8 && xs.vis > 50, `${xs.done}/${xs.vis} in ${Date.now() - t0} ms`)
 await p.click('[data-test=density-L]')
 ok('keine 5xx/JS-Fehler', errs.length === 0, errs.slice(0, 3).join(' | '))
