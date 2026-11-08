@@ -120,7 +120,6 @@ async function saveDialog() {
     else named.value.unshift({ person, clusters: [g.cluster], size, photos, samples: g.samples.slice(0, 4) })
     if (res.queued) {
       notice.value = `✓ ${person} gespeichert — große Gruppe, wird im Hintergrund übernommen (ca. 1 Min.)`
-      setTimeout(() => postSigned('/api/personen', { actions: [{ mode: 'reindex' }] }).catch(() => {}), 60_000)
     } else {
       const out = (res.removed || 0) + (res.auto_removed || 0)
       notice.value = `✓ ${person}: ${res.faces} Gesichter auf ${res.photos} Fotos` + (out ? ` · ${res.removed} markierte + ${res.auto_removed} ähnliche entfernt` : '')

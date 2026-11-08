@@ -1,5 +1,5 @@
 import { ScanCommand } from '@aws-sdk/lib-dynamodb'
-import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 import { gunzipSync, gzipSync } from 'node:zlib'
 import type { H3Event } from 'h3'
 import { ddb, s3, streamToBuffer } from './aws'
@@ -117,11 +117,11 @@ function albumYear(name: string): number {
 // ---- Foto-Index (gallery#2) --------------------------------------------------
 // Früher: jeder Kaltstart scannte die ganze Tabelle (87k Einträge, 4–5 s, wächst mit).
 // Jetzt: fertiger Index als gzip-JSON in S3. Ablauf in getAllPhotos():
-//  1. RAM-Cache jünger als 5 Min -> sofort
+//  1. RAM-Cache jünger als 1 Min -> sofort
 //  2. sonst Index-Datei aus S3 laden (ETag-Abgleich: unverändert = 304, kostet fast nichts)
-//  3. Datei fehlt, falsches Format oder älter als 30 Min -> einmal scannen, Datei neu schreiben
+//  3. Datei fehlt, falsches Format, älter als 30 Min oder Personen seitdem geändert -> einmal scannen, neu schreiben
 // Kosten: ein Scan ≈ 7.900 Lese-Einheiten ≈ 0,1 Cent, höchstens alle 30 Min und nur wenn jemand schaut.
-const TTL_MS = 5 * 60 * 1000
+const TTL_MS = 60 * 1000
 const REBUILD_MS = 30 * 60 * 1000
 export const INDEX_KEY = 'index/gallery-photos.json.gz'
 const INDEX_VERSION = 3 // hochzählen, wenn sich Photo/albumOf ändert -> erzwingt Neuaufbau
@@ -137,18 +137,30 @@ export async function getAllPhotos(region: string, table: string, bucket?: strin
   return inflight
 }
 
+// Personen geändert (photon-faces schreibt faces/clusters.json nach jedem Benennen und nach dem
+// nächtlichen Gruppieren)? Dann ist der Index veraltet -> neu bauen (gallery#10, kein Browser-Timer nötig).
+async function peopleChangedAt(region: string, bucket: string): Promise<number> {
+  try {
+    const h = await s3(region).send(new HeadObjectCommand({ Bucket: bucket, Key: 'faces/clusters.json' }))
+    return h.LastModified?.getTime() ?? 0
+  } catch {
+    return 0
+  }
+}
+
 async function loadIndex(region: string, table: string, bucket: string): Promise<Photo[]> {
+  const changed = peopleChangedAt(region, bucket)
   try {
     const res = await s3(region).send(new GetObjectCommand({ Bucket: bucket, Key: INDEX_KEY, IfNoneMatch: cache?.etag }))
     const file = JSON.parse(gunzipSync(await streamToBuffer(res.Body)).toString('utf8')) as IndexFile
-    if (file.v === INDEX_VERSION && Date.now() - file.builtAt < REBUILD_MS) {
+    if (file.v === INDEX_VERSION && Date.now() - file.builtAt < REBUILD_MS && (await changed) <= file.builtAt) {
       cache = { at: Date.now(), builtAt: file.builtAt, etag: res.ETag, photos: file.photos }
       return file.photos
     }
   } catch (e: any) {
     const status = e?.$metadata?.httpStatusCode
     // 304 = unverändert: RAM-Stand behalten, solange er frisch genug ist
-    if (status === 304 && cache && Date.now() - cache.builtAt < REBUILD_MS) {
+    if (status === 304 && cache && Date.now() - cache.builtAt < REBUILD_MS && (await changed) <= cache.builtAt) {
       cache.at = Date.now()
       return cache.photos
     }
@@ -161,7 +173,7 @@ async function loadIndex(region: string, table: string, bucket: string): Promise
 export async function rebuildIndex(region: string, table: string, bucket: string): Promise<Photo[]> {
   const t0 = Date.now()
   const photos = await scanPhotos(region, table)
-  const builtAt = Date.now()
+  const builtAt = t0 // Stand = Beginn des Scans (Änderungen währenddessen lösen den nächsten Neuaufbau aus)
   let etag: string | undefined
   try {
     const body = gzipSync(JSON.stringify({ v: INDEX_VERSION, builtAt, photos } satisfies IndexFile))
