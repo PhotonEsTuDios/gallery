@@ -52,6 +52,7 @@ export interface Photo {
   origins: Origin[]
   // Personen aus der Gesichtserkennung (staubsauger#14, gallery#7)
   persons?: string[]
+  face_count?: number // Gesichter auf dem Foto (photon-faces), für Personen-Alben (gallery#15)
 }
 
 export interface Album {
@@ -61,6 +62,8 @@ export interface Album {
   latest: string // jüngstes uploaded_at
   date: string // Aufnahmedatum des Albums (JJJJ-MM-TT), Sortierung + Jahres-Gruppen
   year: number // 0 = ohne Datum
+  saved?: boolean // selbst gespeichert (gallery#15), steht oben unter „Meine Alben“
+  person?: string
 }
 
 // Album bestimmen:
@@ -125,7 +128,7 @@ function albumYear(name: string): number {
 const TTL_MS = 60 * 1000
 const REBUILD_MS = 30 * 60 * 1000
 export const INDEX_KEY = 'index/gallery-photos.json.gz'
-const INDEX_VERSION = 3 // hochzählen, wenn sich Photo/albumOf ändert -> erzwingt Neuaufbau
+const INDEX_VERSION = 4 // 4: face_count (gallery#15). hochzählen, wenn sich Photo/albumOf ändert -> erzwingt Neuaufbau
 
 interface IndexFile { v: number; builtAt: number; photos: Photo[] }
 let cache: { at: number; builtAt: number; etag?: string; photos: Photo[] } | null = null
@@ -202,7 +205,7 @@ async function scanPhotos(region: string, table: string): Promise<Photo[]> {
       new ScanCommand({
         TableName: table,
         ProjectionExpression:
-          'sha256, s3_key, original_filename, source_path, #b, uploaded_at, taken_at, quality_score, blurry, dominant_colors, gps_lat, gps_lon, camera_make, camera_model, #src, sources, persons',
+          'sha256, s3_key, original_filename, source_path, #b, uploaded_at, taken_at, quality_score, blurry, dominant_colors, gps_lat, gps_lon, camera_make, camera_model, #src, sources, persons, face_count',
         ExpressionAttributeNames: { '#b': 'bytes', '#src': 'source' },
         ExclusiveStartKey,
       }),
@@ -234,6 +237,7 @@ async function scanPhotos(region: string, table: string): Promise<Photo[]> {
         camera_model: it.camera_model || undefined,
         origins,
         persons: it.persons ? [...it.persons].sort() : undefined,
+        face_count: it.face_count !== undefined ? Number(it.face_count) : undefined,
       })
     }
     ExclusiveStartKey = res.LastEvaluatedKey
@@ -287,6 +291,22 @@ function byTaken(a: Photo, b: Photo): number {
   const ta = takenOf(a) ?? '~', tb = takenOf(b) ?? '~'
   if (ta !== tb) return ta < tb ? -1 : 1
   return a.filename < b.filename ? -1 : 1
+}
+
+/** Fotos zu einer SHA-Liste (gespeicherte Alben, gallery#15), Filter gilt, Aufnahme-Reihenfolge. */
+export async function getPhotosBySha(region: string, table: string, shas: string[], f?: Filter | null): Promise<Photo[]> {
+  const want = new Set(shas)
+  return filtered(await getAllPhotos(region, table), f).filter((p) => want.has(p.sha)).sort(byTaken)
+}
+
+/** Listen-Eintrag für ein gespeichertes Album (Titelbild = bestes Foto). */
+export function savedAlbumEntry(name: string, person: string | undefined, photos: Photo[], createdAt: string): Album | null {
+  if (!photos.length) return null
+  let cover = photos[0]
+  for (const p of photos) if (p.kind === 'photo' && (p.quality_score ?? -1) > (cover.quality_score ?? -1)) cover = p
+  const first = takenOf(photos[0])
+  const date = first ? first.slice(0, 10) : ''
+  return { name, count: photos.length, cover: cover.sha, latest: createdAt, date, year: date ? Number(date.slice(0, 4)) : 0, saved: true, person }
 }
 
 export async function getAlbumPhotos(region: string, table: string, album: string, f?: Filter | null): Promise<Photo[]> {

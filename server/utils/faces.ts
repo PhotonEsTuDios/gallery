@@ -22,6 +22,7 @@ export interface Face {
   sha: string
   face: number
   box?: number[]
+  score?: number
   person?: string
   cluster?: string
   crop: string // id für /face/<id>
@@ -86,6 +87,7 @@ function toFace(it: Record<string, any>): Face {
   return {
     sha: it.sha256, face: Number(it.face),
     box: Array.isArray(it.box) ? it.box.map(Number) : undefined,
+    score: it.score !== undefined ? Number(it.score) : undefined,
     person: it.person || undefined, cluster: it.cluster || undefined,
     crop: cropId(it.crop || `faces/${it.sha256}_${it.face}.jpg`),
   }

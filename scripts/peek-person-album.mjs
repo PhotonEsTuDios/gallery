@@ -1,0 +1,60 @@
+// Live-Test Personen-Alben (gallery#15): Vorschlag 100, Neu mischen, Speichern -> Meine Alben -> öffnen -> löschen.
+// Usage: set -a; . ./.env; set +a; [PERSON=Nepo] [OUT=…] node scripts/peek-person-album.mjs
+import { chromium } from 'playwright'
+const BASE = process.env.BASE || 'https://gallery.photonestudios.com'
+const OUT = process.env.OUT || './person-album'
+const P = process.env.PERSON || 'Nepo'
+const TEST = 'Test Claude – Portraits'
+const b = await chromium.launch(); const p = await (await b.newContext({ viewport: { width: 1400, height: 900 } })).newPage()
+let fail = 0
+const ok = (n, c, i = '') => { console.log(`${c ? '✓' : '✗'} ${n} ${i}`); if (!c) fail++ }
+const errs = []; p.on('pageerror', (e) => errs.push(e.message)); p.on('response', (r) => { if (r.status() >= 500) errs.push(r.status() + ' ' + r.url()) })
+await p.goto(BASE + '/login'); await p.fill('input[type=password]', process.env.GALLERY_PASSWORD); await p.click('button[type=submit]'); await p.waitForURL(BASE + '/')
+let t = Date.now()
+const api = await (await p.request.fetch(`${BASE}/api/person/${encodeURIComponent(P)}/vorschlag?seed=5`, { timeout: 60000 })).json()
+const ms = Date.now() - t
+ok('API Vorschlag', api.photos?.length === Math.min(100, api.candidates), `${api.photos?.length} aus ${api.candidates} in ${ms} ms`)
+const times = api.photos.map((x) => x.taken_at)
+ok('chronologisch', times.every((x, i) => i === 0 || x >= times[i - 1]), `${times[0]?.slice(0, 7)} … ${times.at(-1)?.slice(0, 7)}`)
+ok('über viele Jahre gestreut', new Set(times.map((x) => x.slice(0, 4))).size >= 5, [...new Set(times.map((x) => x.slice(0, 4)))].join(','))
+ok('gleicher Seed = gleich', JSON.stringify((await (await p.request.fetch(`${BASE}/api/person/${encodeURIComponent(P)}/vorschlag?seed=5`)).json()).photos) === JSON.stringify(api.photos))
+ok('unbekannte Person = 404', (await p.request.fetch(`${BASE}/api/person/Niemand123/vorschlag`)).status() === 404)
+
+await p.goto(`${BASE}/personen`, { waitUntil: 'domcontentloaded' })
+await p.locator(`[data-test=named] [data-test=person-album]`).first().click()
+await p.waitForSelector('[data-test=grid] img', { timeout: 60000 })
+await p.waitForTimeout(2500)
+const shas = () => p.evaluate(() => [...document.querySelectorAll('[data-test=grid] img')].map((i) => new URL(i.src).pathname))
+const first = await shas()
+ok('Seite: Vorschlag sichtbar', first.length >= 30, `${first.length} Bilder, ${p.url().replace(BASE, '')}`)
+await p.screenshot({ path: `${OUT}_vorschlag.png` })
+await p.click('[data-test=shuffle]')
+await p.waitForFunction((n) => { const g = document.querySelector('[data-test=grid]'); return g && !g.className.includes('opacity-50') && /seed=/.test(location.search) }, null, { timeout: 60000 })
+await p.waitForTimeout(1000)
+const second = await shas()
+const changed = second.filter((s) => !first.includes(s)).length
+ok('Neu mischen ändert die Auswahl', changed > second.length * 0.3, `${changed}/${second.length} neu, ${p.url().replace(BASE, '')}`)
+
+await p.click('[data-test=save]')
+await p.fill('[data-test=album-name]', TEST)
+await p.click('[data-test=save-confirm]')
+await p.waitForSelector('[data-test=saved]', { timeout: 30000 }).catch(() => {})
+ok('Speichern mit Rückmeldung', (await p.locator('[data-test=saved]').count()) > 0)
+await p.goto(BASE + '/', { waitUntil: 'domcontentloaded' })
+await p.waitForSelector('[data-test=mine]', { timeout: 60000 }).catch(() => {})
+ok('Alben: „Meine Alben“ zeigt es', (await p.locator(`[data-test=mine] >> text=${TEST}`).count()) > 0)
+await p.locator(`[data-test=mine] >> text=${TEST}`).click()
+await p.waitForSelector('[data-test=grid] img', { timeout: 30000 })
+await p.waitForTimeout(1500)
+ok('Album öffnet mit denselben Fotos', (await shas()).length === second.length, `${(await shas()).length} = ${second.length}`)
+await p.screenshot({ path: `${OUT}_album.png` })
+p.once('dialog', (d) => d.accept())
+await p.click('[data-test=album-delete]')
+await p.waitForURL(BASE + '/', { timeout: 30000 }).catch(() => {})
+await p.waitForTimeout(2000)
+ok('Löschen: Album weg', (await p.locator(`text=${TEST}`).count()) === 0)
+const bad = await p.request.fetch(BASE + '/api/albums/saved', { method: 'POST', data: JSON.stringify({ name: 'x', shas: ['nope'] }), headers: { 'content-type': 'application/json' } })
+ok('kaputte Eingabe abgelehnt', bad.status() === 400 || bad.status() === 403, String(bad.status()))
+ok('keine 5xx/JS-Fehler', errs.length === 0, errs.slice(0, 3).join(' | '))
+await b.close()
+console.log(fail ? `✗ ${fail} Fehler` : '✅ alles grün'); process.exit(fail ? 1 : 0)

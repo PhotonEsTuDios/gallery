@@ -1,4 +1,5 @@
-import { getAlbumPhotos, filterFrom } from '../../utils/photos'
+import { getAlbumPhotos, filterFrom, getPhotosBySha } from '../../utils/photos'
+import { getSavedAlbums } from '../../utils/savedAlbums'
 import { pageOf } from '../../utils/page'
 
 // Album-Inhalt, seitenweise (gallery#2). count = alle Medien, photos = diese Seite, next = nächster Offset.
@@ -7,12 +8,18 @@ export default defineEventHandler(async (event) => {
   const name = decodeURIComponent(getRouterParam(event, 'name') || '')
   if (!name) throw createError({ statusCode: 400, statusMessage: 'Album fehlt' })
 
-  const photos = await getAlbumPhotos(cfg.awsRegion, cfg.photosTable, name, filterFrom(event))
+  // gespeichertes Album (gallery#15) geht vor einem gleichnamigen Session-Album
+  const saved = (await getSavedAlbums(event)).find((a) => a.name === name)
+  const photos = saved
+    ? await getPhotosBySha(cfg.awsRegion, cfg.photosTable, saved.shas, filterFrom(event))
+    : await getAlbumPhotos(cfg.awsRegion, cfg.photosTable, name, filterFrom(event))
   if (!photos.length) throw createError({ statusCode: 404, statusMessage: 'Album leer' })
 
   const { total, offset, next, slice } = pageOf(event, photos)
   return {
     name,
+    saved: !!saved,
+    person: saved?.person,
     count: total,
     offset,
     next,

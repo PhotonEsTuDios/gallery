@@ -9,6 +9,8 @@ interface Photo {
 }
 interface AlbumData {
   name: string
+  saved?: boolean
+  person?: string
   count: number
   photos: Photo[]
   next: number | null
@@ -55,6 +57,13 @@ function open(i: number) {
   openIndex.value = i
 }
 
+// Gespeichertes Album löschen (gallery#15)
+async function removeAlbum() {
+  if (!album.value?.saved || !confirm(`Album „${album.value.name}“ löschen? Die Fotos bleiben im Archiv.`)) return
+  await postSigned('/api/albums/saved', { delete: album.value.name })
+  await navigateTo('/')
+}
+
 // Vorschaugröße XS…XL, gemeinsam mit allen Ansichten (gallery#14)
 const { cell, thumbW, gridStyle } = useDensity()
 </script>
@@ -65,7 +74,9 @@ const { cell, thumbW, gridStyle } = useDensity()
       <NuxtLink to="/" class="text-neutral-500 transition hover:text-neutral-200">←</NuxtLink>
       <h1 class="text-sm font-medium">{{ album?.name || name }}</h1>
       <span v-if="album" class="text-xs text-neutral-500">{{ album.count }} Medien</span>
+      <NuxtLink v-if="album?.person" :to="`/person/${encodeURIComponent(album.person)}`" class="text-xs text-neutral-500 hover:text-neutral-200">aus Vorschlag {{ album.person }}</NuxtLink>
       <DensityToggle class="ml-auto" />
+      <button v-if="album?.saved" data-test="album-delete" class="text-xs text-neutral-500 hover:text-red-300" @click="removeAlbum">Löschen</button>
       <!-- Filter nur zeigen, wenn das Album überhaupt Videos hat -->
       <div v-if="nVideos" class="flex gap-1 rounded-full border border-line p-0.5 text-xs">
         <button

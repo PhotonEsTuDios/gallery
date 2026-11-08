@@ -148,20 +148,22 @@ const when = computed(() => (generatedAt.value ? new Date(generatedAt.value).toL
     <section v-if="named.length" class="mb-10">
       <h2 class="mb-3 border-b border-line pb-2 text-lg font-medium">Benannt <span class="text-xs text-neutral-500">{{ named.length }}</span></h2>
       <div class="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6" data-test="named">
-        <NuxtLink
+        <div
           v-for="n in named"
           :key="n.person"
-          :to="{ path: '/timeline', query: { p: n.person } }"
           class="group overflow-hidden rounded-xl border border-line transition hover:border-neutral-500"
         >
-          <div class="grid grid-cols-2">
+          <NuxtLink :to="`/person/${encodeURIComponent(n.person)}`" class="grid grid-cols-2" title="Album-Vorschlag">
             <img v-for="s in n.samples.slice(0, 4)" :key="s" :src="crop(s)" alt="" loading="lazy" class="aspect-square w-full object-cover" />
-          </div>
+          </NuxtLink>
           <div class="p-2">
             <div class="truncate text-sm font-medium">{{ n.person }}</div>
-            <div class="text-xs text-neutral-500">{{ n.photos }} Fotos · Timeline →</div>
+            <div class="flex justify-between text-xs text-neutral-500">
+              <NuxtLink :to="{ path: '/timeline', query: { p: n.person } }" class="hover:text-neutral-200">{{ n.photos }} Fotos · Timeline</NuxtLink>
+              <NuxtLink :to="`/person/${encodeURIComponent(n.person)}`" class="text-neutral-300 hover:text-white" data-test="person-album">Album →</NuxtLink>
+            </div>
           </div>
-        </NuxtLink>
+        </div>
       </div>
     </section>
 
