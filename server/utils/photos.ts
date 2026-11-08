@@ -4,6 +4,7 @@ import { gunzipSync, gzipSync } from 'node:zlib'
 import type { H3Event } from 'h3'
 import { ddb, s3, streamToBuffer } from './aws'
 import { assignSessions, takenOf } from './sessions'
+import { bucketLabel, bucketOf, inBucket, planSpans, spanOf, type Span } from './buckets'
 import { applyFilter, colorFamily, parseFilter, type Filter, type Origin } from './filter'
 
 // ---- Herkunft (Quelle) -----------------------------------------------------
@@ -298,25 +299,11 @@ export async function getAlbumPhotos(region: string, table: string, album: strin
 // Vorher uploaded_at: da landeten 16.012 Time-Machine-Bilder im Upload-Monat 2022-08
 // und die Seite rendete einen Riesen-Grid. Nach Aufnahmezeit ist der größte Monat ~2.600.
 export interface TimelineMonth {
-  ym: string // "2026-06"  bzw. "0000-00" für Fotos ohne Datum
-  label: string // "Juni 2026"
+  ym: string // Abschnitt (gallery#11): "2026-06" Monat, "2026-Q3" Quartal, "2026" Jahr, "0000-00" ohne Datum
+  label: string // "Juni 2026" · "Jul – Sep 2026" · "2026"
+  span: Span
   count: number
   cover: string // sha des Titelbilds (jüngstes des Monats)
-}
-
-const MONTHS_DE = [
-  'Januar', 'Februar', 'März', 'April', 'Mai', 'Juni',
-  'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember',
-]
-
-function ymOf(p: Photo): string {
-  return (takenOf(p) || '').slice(0, 7) || '0000-00'
-}
-
-function labelOf(ym: string): string {
-  if (ym === '0000-00') return 'Ohne Datum'
-  const [y, m] = ym.split('-')
-  return `${MONTHS_DE[Number(m) - 1] ?? m} ${y}`
 }
 
 // Innerhalb eines Monats: jüngste Aufnahme zuerst, dann Dateiname.
@@ -328,19 +315,24 @@ function byNewest(a: Photo, b: Photo): number {
 
 export async function getTimelineIndex(region: string, table: string, f?: Filter | null): Promise<TimelineMonth[]> {
   const photos = filtered(await getAllPhotos(region, table), f)
+  // dünne Monate je Jahr zu Quartalen/Jahr zusammenfassen (gallery#11, Regel in buckets.ts)
+  const monthCounts = new Map<string, number>()
+  for (const p of photos) monthCounts.set(ymOf(p), (monthCounts.get(ymOf(p)) ?? 0) + 1)
+  const plan = planSpans(monthCounts)
   const map = new Map<string, Photo[]>()
   for (const p of photos) {
-    const ym = ymOf(p)
-    const arr = map.get(ym)
+    const key = bucketOf(ymOf(p), plan)
+    const arr = map.get(key)
     if (arr) arr.push(p)
-    else map.set(ym, [p])
+    else map.set(key, [p])
   }
   const months: TimelineMonth[] = []
-  for (const [ym, arr] of map) {
+  for (const [key, arr] of map) {
     arr.sort(byNewest)
-    months.push({ ym, label: labelOf(ym), count: arr.length, cover: (arr.find((p) => p.kind === 'photo') ?? arr[0]).sha })
+    months.push({ ym: key, label: bucketLabel(key), span: spanOf(key), count: arr.length, cover: (arr.find((p) => p.kind === 'photo') ?? arr[0]).sha })
   }
-  // neueste Monate zuerst; "Ohne Datum" (0000-00) landet damit ganz unten
+  // neueste zuerst; "2026" > "2026-Q4" > "2026-12" stört nicht, weil ein Jahr nur eine Stufe hat.
+  // "Ohne Datum" (0000-00) landet ganz unten.
   months.sort((a, b) => (a.ym < b.ym ? 1 : a.ym > b.ym ? -1 : 0))
   return months
 }
@@ -354,10 +346,10 @@ export interface TimelinePhoto {
   kind: 'photo' | 'video'
 }
 
-export async function getTimelineMonth(region: string, table: string, ym: string, f?: Filter | null): Promise<TimelinePhoto[]> {
+export async function getTimelineMonth(region: string, table: string, key: string, f?: Filter | null): Promise<TimelinePhoto[]> {
   const photos = filtered(await getAllPhotos(region, table), f)
   return photos
-    .filter((p) => ymOf(p) === ym)
+    .filter((p) => inBucket(ymOf(p), key))
     .sort(byNewest)
     .map((p) => ({ sha: p.sha, filename: p.filename, bytes: p.bytes, uploaded_at: p.uploaded_at, taken_at: takenOf(p), kind: p.kind }))
 }

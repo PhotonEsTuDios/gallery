@@ -1,7 +1,8 @@
 <script setup lang="ts">
 interface TimelineMonth {
-  ym: string
+  ym: string // Abschnitt: 2026-08 / 2026-Q3 / 2026 (gallery#11)
   label: string
+  span: 'month' | 'quarter' | 'year'
   count: number
   cover: string
 }
@@ -166,6 +167,7 @@ onUnmounted(() => {
 // 5) Jahres-/Monats-Sprungleiste — aus dem Monats-Index gruppiert.
 const MON_SHORT = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez']
 function monShort(ym: string) {
+  if (ym.includes('Q')) return ym.slice(5) // "Q3"
   return MON_SHORT[Number(ym.slice(5, 7)) - 1] ?? '·'
 }
 const years = computed(() => {
@@ -294,8 +296,9 @@ function open(sha: string) {
         >
           {{ y.label }}
         </button>
-        <!-- Monats-Flyout beim Hovern -->
+        <!-- Monats-/Quartals-Flyout beim Hovern (nicht bei einem ganzen Jahr) -->
         <div
+          v-if="y.months.length > 1 || y.months[0].span !== 'year'"
           class="absolute right-full top-1/2 mr-1 hidden -translate-y-1/2 flex-wrap justify-end gap-1 rounded-lg border border-line bg-ink/95 p-2 backdrop-blur group-hover/year:flex"
           style="width: 180px"
         >
