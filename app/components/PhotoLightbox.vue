@@ -44,6 +44,47 @@ function prev() {
   emit('update:index', (props.index - 1 + props.photos.length) % props.photos.length)
 }
 
+// ---- Sterne (gallery#19) --------------------------------------------------------
+// 1–5 Sterne je Foto, global. Klick setzt, derselbe Stern nochmal nimmt zurück. Nur Maus/Tippen.
+const rating = ref<number | null>(null)
+const ratingHover = ref(0)
+const ratingBusy = ref(false)
+const ratingError = ref('')
+const ratingCache = useState<Record<string, number | null>>('ratings', () => ({}))
+watch(current, async (c) => {
+  ratingError.value = ''
+  ratingHover.value = 0
+  rating.value = c ? ratingCache.value[c.sha] ?? null : null
+  if (!c) return
+  try {
+    const r = await $fetch<{ sha: string; rating: number | null }>(`/api/rating/${c.sha}`)
+    ratingCache.value[r.sha] = r.rating
+    if (current.value?.sha === r.sha && !ratingBusy.value) rating.value = r.rating
+  } catch {
+    if (current.value?.sha === c.sha) ratingError.value = 'Bewertung konnte nicht geladen werden'
+  }
+}, { immediate: true })
+async function rate(n: number, e?: Event) {
+  ;(e?.currentTarget as HTMLElement | null)?.blur() // kein Tasten-Fokus auf den Sternen
+  const c = current.value
+  if (!c || ratingBusy.value) return
+  const before = rating.value
+  const want = before === n ? null : n
+  rating.value = want
+  ratingBusy.value = true
+  ratingError.value = ''
+  try {
+    const r = await postSigned<{ sha: string; rating: number | null }>(`/api/rating/${c.sha}`, { rating: want })
+    ratingCache.value[c.sha] = r.rating
+    if (current.value?.sha === c.sha) rating.value = r.rating
+  } catch {
+    ratingCache.value[c.sha] = before
+    if (current.value?.sha === c.sha) { rating.value = before; ratingError.value = 'Nicht gespeichert – bitte nochmal klicken' }
+  } finally {
+    ratingBusy.value = false
+  }
+}
+
 // ---- Gesichter (gallery#9) -----------------------------------------------------
 // Tiere (gallery#18) laufen durch dieselben Rahmen; tier = true wählt den Tier-Namensraum (?art=tiere)
 interface Face { sha: string; face: number; box?: number[]; person?: string; cluster?: string; crop: string; tier?: boolean }
@@ -211,6 +252,33 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <button type="button" class="px-2 text-neutral-500 hover:text-white" @click="editing = null">✕</button>
         <span v-if="faceError" class="pr-2 text-red-400">{{ faceError }}</span>
       </form>
+
+      <!-- Sterne (gallery#19) -->
+      <div class="absolute bottom-5 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2">
+        <p v-if="ratingError" class="text-xs text-red-400" data-test="stars-error">{{ ratingError }}</p>
+        <div
+          class="flex items-center rounded-full border border-line bg-ink/80 px-2 py-0.5 backdrop-blur"
+          data-test="stars"
+          :data-rating="rating ?? 0"
+          @mouseleave="ratingHover = 0"
+        >
+          <button
+            v-for="n in 5"
+            :key="n"
+            type="button"
+            tabindex="-1"
+            data-test="star"
+            :aria-pressed="(rating ?? 0) >= n"
+            :title="rating === n ? 'Bewertung zurücknehmen' : `${n} von 5 Sternen`"
+            class="px-1.5 py-1 text-2xl leading-none transition"
+            :class="(ratingHover || rating || 0) >= n ? 'text-amber-400' : 'text-neutral-600 hover:text-neutral-400'"
+            @mouseenter="ratingHover = n"
+            @click.stop="rate(n, $event)"
+          >
+            ★
+          </button>
+        </div>
+      </div>
 
       <a
         :href="isVideo ? (videoUrl || '#') : `/img/${current.sha}?dl=1`"

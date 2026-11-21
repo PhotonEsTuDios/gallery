@@ -7,11 +7,16 @@ R=${AWS_REGION:-eu-west-1}; ROLE=${GALLERY_ROLE:-photon-gallery-exec}
 B=${PHOTOS_BUCKET:?PHOTOS_BUCKET fehlt}; T=${PHOTOS_TABLE:-photonestudios-photos}
 FT=${FACES_TABLE:-photonestudios-faces}; FN=${FACES_FUNCTION:-photon-faces}
 AT=${ANIMALS_TABLE:-photonestudios-animals}; AFN=${ANIMALS_FUNCTION:-photon-animals}   # Tiere (gallery#18)
+# Sterne (gallery#19): UpdateItem am Foto, aber nur für die Felder rating + rated_at (sha256 = Schlüssel in der Bedingung)
 A=$(aws sts get-caller-identity --query Account --output text)
 aws iam put-role-policy --role-name "$ROLE" --policy-name gallery-data --policy-document "{
  \"Version\":\"2012-10-17\",\"Statement\":[
   {\"Sid\":\"Fotos\",\"Effect\":\"Allow\",\"Action\":[\"dynamodb:GetItem\",\"dynamodb:Query\",\"dynamodb:Scan\"],
    \"Resource\":\"arn:aws:dynamodb:$R:$A:table/$T\"},
+  {\"Sid\":\"Bewerten\",\"Effect\":\"Allow\",\"Action\":[\"dynamodb:UpdateItem\"],
+   \"Resource\":\"arn:aws:dynamodb:$R:$A:table/$T\",
+   \"Condition\":{\"ForAllValues:StringEquals\":{\"dynamodb:Attributes\":[\"sha256\",\"rating\",\"rated_at\"]},
+                 \"StringEqualsIfExists\":{\"dynamodb:ReturnValues\":[\"NONE\",\"UPDATED_OLD\",\"UPDATED_NEW\"]}}},
   {\"Sid\":\"Gesichter\",\"Effect\":\"Allow\",\"Action\":[\"dynamodb:Query\"],
    \"Resource\":[\"arn:aws:dynamodb:$R:$A:table/$FT\",\"arn:aws:dynamodb:$R:$A:table/$FT/index/cluster-index\",
                \"arn:aws:dynamodb:$R:$A:table/$AT\",\"arn:aws:dynamodb:$R:$A:table/$AT/index/cluster-index\"]},
@@ -20,4 +25,4 @@ aws iam put-role-policy --role-name "$ROLE" --policy-name gallery-data --policy-
   {\"Sid\":\"Benennen\",\"Effect\":\"Allow\",\"Action\":[\"lambda:InvokeFunction\"],
    \"Resource\":[\"arn:aws:lambda:$R:$A:function:$FN\",\"arn:aws:lambda:$R:$A:function:$AFN\"]}
  ]}"
-echo "  ✓ Rechte $ROLE (Fotos, Gesichter + Tiere lesen, Archiv, photon-faces + photon-animals aufrufen)"
+echo "  ✓ Rechte $ROLE (Fotos lesen + nur rating/rated_at schreiben, Gesichter + Tiere lesen, Archiv, photon-faces + photon-animals aufrufen)"
