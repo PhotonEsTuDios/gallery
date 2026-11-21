@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Live-Stand der Raw-Importe (z.B. Time-Machine-Backup) — liest progress.json,
-// das der Import-Treiber nach jedem Batch nach S3 schreibt.
+// das der Import-Treiber nach jedem Batch nach S3 schreibt. Darunter die Läufe der Erkennung (gallery#21).
 interface Progress {
   name: string
   state: string
@@ -21,16 +21,38 @@ interface Progress {
 }
 
 const { data, refresh } = useFetch<Progress[]>('/api/import', { server: false })
+
+// Läufe der Tier- und Gesichtserkennung (gallery#21): Fortschritts-Einträge aus staubsauger
+interface Run {
+  key: string
+  label: string
+  found_label: string
+  state: string
+  done: number
+  total: number
+  found: number
+  err: number
+  packages_done: number
+  packages: number
+  percent: number
+  planned_at: string | null
+  updated_at: string | null
+}
+const { data: runs, refresh: refreshRuns } = useFetch<Run[]>('/api/erkennung', { server: false })
+const day = (iso?: string | null) => (iso ? new Date(iso).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' }) : '–')
+
 let timer: ReturnType<typeof setInterval> | undefined
-onMounted(() => (timer = setInterval(() => refresh(), 15000)))
+onMounted(() => (timer = setInterval(() => { refresh(); refreshRuns() }, 15000)))
 onBeforeUnmount(() => timer && clearInterval(timer))
 
 const gb = (b?: number) => ((b ?? 0) / 1e9).toFixed(1)
 const fmt = (n?: number) => (n ?? 0).toLocaleString('de-DE')
-function ago(iso?: string) {
+function ago(iso?: string | null) {
   if (!iso) return ''
   const s = Math.round((Date.now() - Date.parse(iso)) / 1000)
-  return s < 90 ? `vor ${s} s` : `vor ${Math.round(s / 60)} min`
+  if (s < 90) return `vor ${s} s`
+  if (s < 5400) return `vor ${Math.round(s / 60)} min`
+  return s < 172800 ? `vor ${Math.round(s / 3600)} h` : `vor ${Math.round(s / 86400)} Tagen`
 }
 function eta(h?: number | null) {
   if (h == null) return '–'
@@ -87,5 +109,45 @@ function eta(h?: number | null) {
         </details>
       </template>
     </section>
+
+    <!-- Erkennung (gallery#21) -->
+    <template v-if="runs?.length">
+      <h2 class="mb-4 mt-10 text-sm uppercase tracking-[0.2em] text-neutral-500">Erkennung</h2>
+      <section v-for="r in runs" :key="r.key" class="mb-8 rounded-xl border border-line p-5" :data-test="`run-${r.key}`">
+        <div class="mb-3 flex items-baseline justify-between gap-4">
+          <div>
+            <div class="text-sm font-medium">{{ r.label }}</div>
+            <div class="text-xs text-neutral-500">letzter Lauf geplant {{ day(r.planned_at) }}</div>
+          </div>
+          <div
+            class="rounded-full border px-3 py-1 text-xs"
+            :class="r.state === 'fertig' ? 'border-emerald-700 text-emerald-400' : r.state === 'läuft' ? 'border-sky-700 text-sky-300' : 'border-line text-neutral-400'"
+            data-test="run-state"
+          >
+            {{ r.state }}
+          </div>
+        </div>
+
+        <template v-if="r.total">
+          <div class="mb-1 h-2 overflow-hidden rounded-full bg-neutral-800">
+            <div class="h-full transition-all" :class="r.state === 'fertig' ? 'bg-emerald-500' : 'bg-sky-500'" :style="{ width: `${r.percent}%` }" data-test="run-bar" />
+          </div>
+          <div class="mb-4 flex justify-between text-xs text-neutral-400">
+            <span>{{ r.percent.toLocaleString('de-DE') }} %</span>
+            <span data-test="run-count">{{ fmt(r.done) }} / {{ fmt(r.total) }} Fotos</span>
+          </div>
+          <dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+            <div><dt class="text-xs text-neutral-500">{{ r.found_label }}</dt><dd>{{ fmt(r.found) }}</dd></div>
+            <div><dt class="text-xs text-neutral-500">Fehler</dt><dd :class="r.err ? 'text-rose-400' : ''">{{ fmt(r.err) }}</dd></div>
+            <div><dt class="text-xs text-neutral-500">Pakete fertig</dt><dd>{{ fmt(r.packages_done) }} / {{ fmt(r.packages) }}</dd></div>
+            <div><dt class="text-xs text-neutral-500">aktualisiert</dt><dd>{{ ago(r.updated_at) }}</dd></div>
+          </dl>
+        </template>
+        <p v-else-if="r.state === 'fertig'" class="text-xs text-neutral-500" data-test="run-count">
+          Im letzten Lauf gab es keine neuen Fotos zu prüfen (0 / 0) · aktualisiert {{ ago(r.updated_at) }}
+        </p>
+        <p v-else class="text-xs text-neutral-500">Noch kein Lauf geplant.</p>
+      </section>
+    </template>
   </div>
 </template>

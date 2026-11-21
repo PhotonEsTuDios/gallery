@@ -24,6 +24,8 @@ const wort = computed(() => tiere.value
   ? { frage: 'Welches Tier ist das?', die: 'das Tier', viele: 'Tiere', leer: 'Noch keine Gruppen — die Tier-Erkennung gruppiert täglich um 06:15 UTC.' }
   : { frage: 'Wer ist das?', die: 'die Person', viele: 'Gesichter', leer: 'Noch keine Gruppen — die Gesichtserkennung gruppiert täglich um 06:00 UTC.' })
 
+const tab = (active: boolean) => (active ? 'bg-neutral-100 font-medium text-black' : 'text-neutral-200 hover:bg-neutral-800 hover:text-white')
+
 const cropSrc = (id: string) => `/face/${id}${tiere.value ? '?art=tiere' : ''}`
 const crop = (key: string) => cropSrc(key.replace(/^(faces|animals)\//, '').replace(/\.jpg$/, ''))
 
@@ -157,10 +159,11 @@ const when = computed(() => (generatedAt.value ? new Date(generatedAt.value).toL
 
 <template>
   <div class="mx-auto max-w-7xl px-5 py-8">
-    <div class="mb-6 flex flex-wrap items-baseline justify-between gap-2">
-      <h1 class="flex gap-4 text-sm uppercase tracking-[0.2em]" data-test="art">
-        <NuxtLink to="/personen" :class="tiere ? 'text-neutral-600 hover:text-neutral-300' : 'text-neutral-300'">Personen</NuxtLink>
-        <NuxtLink :to="{ path: '/personen', query: { art: 'tiere' } }" :class="tiere ? 'text-neutral-300' : 'text-neutral-600 hover:text-neutral-300'">Tiere</NuxtLink>
+    <div class="mb-6 flex flex-wrap items-center justify-between gap-2">
+      <!-- Umschalter als zwei klare Reiter (gallery#21): gewählt = hell hinterlegt, der andere gut lesbar -->
+      <h1 class="inline-flex gap-1 rounded-full border border-neutral-600 p-1 text-sm uppercase tracking-[0.15em]" data-test="art">
+        <NuxtLink to="/personen" class="rounded-full px-5 py-1.5 transition" :class="tab(!tiere)" :aria-current="tiere ? undefined : 'page'">Personen</NuxtLink>
+        <NuxtLink :to="{ path: '/personen', query: { art: 'tiere' } }" class="rounded-full px-5 py-1.5 transition" :class="tab(tiere)" :aria-current="tiere ? 'page' : undefined">Tiere</NuxtLink>
       </h1>
       <span v-if="when" class="text-xs text-neutral-500">gruppiert {{ when }} · täglich neu</span>
     </div>
