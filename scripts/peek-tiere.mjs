@@ -82,9 +82,10 @@ const sha = tiere.groups[0]?.samples[0]?.replace(/^animals\//, '').slice(0, 64)
 const faces = sha ? await json(`/api/faces/${sha}?art=tiere`) : { faces: [] }
 ok('API Tiere am Foto', faces.faces.length > 0 && faces.faces[0].box?.length === 4, `${faces.faces.length} Tier(e)`)
 let album = ''
-for (const a of (await json('/api/albums')).slice(0, 400)) {
-  const al = await json(`/api/album/${encodeURIComponent(a.name)}`).catch(() => null)
-  if (al?.photos?.some((x) => x.sha === sha)) { album = a.name; break }
+const alben = await json('/api/albums') // das Album des Fotos suchen, je 8 gleichzeitig
+for (let i = 0; i < alben.length && !album; i += 8) {
+  const hit = await Promise.all(alben.slice(i, i + 8).map(async (a) => ((await json(`/api/album/${encodeURIComponent(a.name)}`).catch(() => null))?.photos?.some((x) => x.sha === sha) ? a.name : '')))
+  album = hit.find(Boolean) || ''
 }
 ok('Album zum Tier-Foto gefunden', !!album)
 if (album) {
