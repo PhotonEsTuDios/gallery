@@ -1,7 +1,7 @@
 // Gemeinsamer Filter für alle Ansichten (gallery#8), steht in der URL -> speicherbar und teilbar:
-//   /timeline?p=Santi,Nepo&pm=oder&farbe=Blau&jahr=2024&herkunft=dropbox
+//   /timeline?p=Santi,Nepo&pm=oder&t=Bello&farbe=Blau&jahr=2024&herkunft=dropbox   (t = Tiere, gallery#18)
 // Server-Gegenstück: server/utils/filter.ts (gleiche Parameter).
-export const FILTER_KEYS = ['p', 'pm', 'farbe', 'jahr', 'herkunft'] as const
+export const FILTER_KEYS = ['p', 'pm', 't', 'farbe', 'jahr', 'herkunft'] as const
 type Key = (typeof FILTER_KEYS)[number]
 
 export const HERKUNFT_OPTIONEN = [
@@ -33,11 +33,12 @@ export function useFilter() {
   })
   const listOf = (k: Key) => computed(() => (query.value[k] || '').split(',').filter(Boolean))
   const persons = listOf('p')
+  const animals = listOf('t')
   const colors = listOf('farbe')
   const years = listOf('jahr')
   const origins = listOf('herkunft')
   const personMode = computed<'zusammen' | 'oder'>(() => (query.value.pm === 'oder' ? 'oder' : 'zusammen'))
-  const active = computed(() => persons.value.length + colors.value.length + years.value.length + origins.value.length > 0)
+  const active = computed(() => persons.value.length + animals.value.length + colors.value.length + years.value.length + origins.value.length > 0)
 
   function setParam(k: Key, value: string | undefined) {
     return navigateTo({ path: route.path, hash: route.hash, query: { ...route.query, [k]: value || undefined } }, { replace: true })
@@ -62,5 +63,5 @@ export function useFilter() {
     return { path, query: query.value }
   }
 
-  return { query, persons, colors, years, origins, personMode, active, toggle, setList, setPersonMode, clear, to }
+  return { query, persons, animals, colors, years, origins, personMode, active, toggle, setList, setPersonMode, clear, to }
 }

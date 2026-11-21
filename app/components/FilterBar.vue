@@ -1,9 +1,11 @@
 <script setup lang="ts">
-// Gemeinsame Filterleiste (gallery#8): Personen (zusammen/oder), Farbe, Jahr, Herkunft.
+// Gemeinsame Filterleiste (gallery#8): Personen (zusammen/oder), Tiere (gallery#18), Farbe, Jahr, Herkunft.
 // Alles steht in der URL (useFilter) und gilt für jede Ansicht.
 const f = useFilter()
 const { data: names } = useFetch<{ name: string; count: number }[]>('/api/personen/namen', { lazy: true, server: false, default: () => [] })
 const { data: counts } = useFetch<Record<string, number>>('/api/herkunft', { lazy: true, server: false })
+// Tiere: Gruppe erscheint erst, wenn mindestens ein Tier benannt ist
+const { data: animalNames } = useFetch<{ name: string; count: number }[]>('/api/personen/namen', { query: { art: 'tiere' }, lazy: true, server: false, default: () => [] })
 
 const more = ref(false)
 const search = ref('')
@@ -65,6 +67,17 @@ const off = 'border-line text-neutral-500 hover:text-neutral-200'
     <NuxtLink v-if="!names?.length" to="/personen" class="text-neutral-500 underline-offset-2 hover:underline">
       noch niemand benannt → Personen
     </NuxtLink>
+
+    <template v-if="animalNames?.length || f.animals.value.length">
+      <span class="mx-1 h-4 w-px bg-line" />
+      <span class="uppercase tracking-[0.15em] text-neutral-500">Tiere</span>
+      <button v-for="a in f.animals.value" :key="a" :class="[chip, on]" :title="`${a} entfernen`" data-test="tier-an" @click="f.toggle('t', a)">
+        {{ a }} <span class="text-neutral-500">✕</span>
+      </button>
+      <button v-for="a in (animalNames ?? []).filter((x) => !f.animals.value.includes(x.name)).slice(0, 6)" :key="a.name" :class="[chip, off]" data-test="tier" @click="f.toggle('t', a.name)">
+        + {{ a.name }}<span class="ml-1 text-neutral-600">{{ a.count }}</span>
+      </button>
+    </template>
 
     <span class="mx-1 h-4 w-px bg-line" />
 

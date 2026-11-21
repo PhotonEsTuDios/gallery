@@ -55,7 +55,9 @@ function pick(pillar: Pillar | null) {
 }
 
 // ---- Gesichter (gallery#9) -----------------------------------------------------
-interface Face { sha: string; face: number; box?: number[]; person?: string; cluster?: string; crop: string }
+// Tiere (gallery#18) laufen durch dieselben Rahmen; tier = true wählt den Tier-Namensraum (?art=tiere)
+interface Face { sha: string; face: number; box?: number[]; person?: string; cluster?: string; crop: string; tier?: boolean }
+const artOf = (f: Face) => (f.tier ? '?art=tiere' : '')
 const faces = ref<Face[]>([])
 const showFaces = useState('lightbox-faces', () => false)
 const editing = ref<Face | null>(null)
@@ -63,14 +65,19 @@ const faceName = ref('')
 const faceBusy = ref(false)
 const faceError = ref('')
 const { data: knownNames } = useFetch<{ name: string; count: number }[]>('/api/personen/namen', { lazy: true, server: false, default: () => [] })
-const peopleHere = computed(() => [...new Set(faces.value.map((f) => f.person).filter(Boolean))] as string[])
+const { data: knownAnimals } = useFetch<{ name: string; count: number }[]>('/api/personen/namen', { query: { art: 'tiere' }, lazy: true, server: false, default: () => [] })
+const peopleHere = computed(() => [...new Set(faces.value.filter((f) => !f.tier).map((f) => f.person).filter(Boolean))] as string[])
+const animalsHere = computed(() => [...new Set(faces.value.filter((f) => f.tier).map((f) => f.person).filter(Boolean))] as string[])
 async function loadFaces(c: Photo | null) {
   faces.value = []
   editing.value = null
   if (!c || c.kind === 'video') return
   try {
-    const r = await $fetch<{ sha: string; faces: Face[] }>(`/api/faces/${c.sha}`)
-    if (current.value?.sha === r.sha) faces.value = r.faces
+    const [r, t] = await Promise.all([
+      $fetch<{ sha: string; faces: Face[] }>(`/api/faces/${c.sha}`),
+      $fetch<{ sha: string; faces: Face[] }>(`/api/faces/${c.sha}`, { query: { art: 'tiere' } }).catch(() => ({ sha: c.sha, faces: [] as Face[] })),
+    ])
+    if (current.value?.sha === r.sha) faces.value = r.faces.concat(t.faces.map((f) => ({ ...f, tier: true })))
   } catch {
     faces.value = []
   }
@@ -87,7 +94,7 @@ async function saveFace(mode: 'name_face' | 'reject') {
   faceBusy.value = true
   faceError.value = ''
   try {
-    await postSigned('/api/personen', { actions: [mode === 'reject' ? { mode, sha: f.sha, face: f.face } : { mode, sha: f.sha, face: f.face, person: faceName.value.trim() }] })
+    await postSigned(`/api/personen${artOf(f)}`, { actions: [mode === 'reject' ? { mode, sha: f.sha, face: f.face } : { mode, sha: f.sha, face: f.face, person: faceName.value.trim() }] })
     if (mode === 'reject') faces.value = faces.value.filter((x) => x !== f)
     else f.person = faceName.value.trim() || undefined
     editing.value = null
@@ -155,7 +162,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <template v-if="showFaces">
           <button
             v-for="f in faces"
-            :key="f.face"
+            :key="`${f.tier ? 't' : ''}${f.face}`"
             class="absolute rounded-sm border-2 transition"
             :class="editing === f ? 'border-amber-300' : f.person ? 'border-white/80 hover:border-white' : 'border-white/40 border-dashed hover:border-white'"
             :style="{ left: `${(f.box?.[0] ?? 0) * 100}%`, top: `${(f.box?.[1] ?? 0) * 100}%`, width: `${(f.box?.[2] ?? 0) * 100}%`, height: `${(f.box?.[3] ?? 0) * 100}%` }"
@@ -187,6 +194,15 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         >
           {{ p }}
         </NuxtLink>
+        <NuxtLink
+          v-for="a in animalsHere"
+          :key="`t-${a}`"
+          :to="{ path: '/timeline', query: { t: a } }"
+          class="rounded-full bg-black/60 px-3 py-1 text-neutral-200 hover:bg-black/80"
+          @click="close"
+        >
+          {{ a }}
+        </NuxtLink>
       </div>
 
       <!-- Gesicht benennen -->
@@ -196,17 +212,17 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         data-test="face-edit"
         @submit.prevent="saveFace('name_face')"
       >
-        <img :src="`/face/${editing.crop}`" alt="" class="h-7 w-7 rounded-full object-cover" />
+        <img :src="`/face/${editing.crop}${artOf(editing)}`" alt="" class="h-7 w-7 rounded-full object-cover" />
         <input
           v-model="faceName"
           list="lightbox-names"
-          placeholder="Wer ist das?"
+          :placeholder="editing.tier ? 'Welches Tier ist das?' : 'Wer ist das?'"
           autofocus
           class="w-40 bg-transparent px-1 text-neutral-100 placeholder:text-neutral-600 focus:outline-none"
         />
-        <datalist id="lightbox-names"><option v-for="n in knownNames" :key="n.name" :value="n.name" /></datalist>
+        <datalist id="lightbox-names"><option v-for="n in (editing.tier ? knownAnimals : knownNames)" :key="n.name" :value="n.name" /></datalist>
         <button type="submit" class="rounded-full bg-neutral-100 px-3 py-1 text-black disabled:opacity-50" :disabled="faceBusy">{{ faceBusy ? '…' : 'Speichern' }}</button>
-        <button type="button" class="px-2 text-neutral-400 hover:text-red-300" title="kein Gesicht / falsch erkannt" :disabled="faceBusy" @click="saveFace('reject')">kein Gesicht</button>
+        <button type="button" class="px-2 text-neutral-400 hover:text-red-300" :title="editing.tier ? 'kein Tier / falsch erkannt' : 'kein Gesicht / falsch erkannt'" :disabled="faceBusy" @click="saveFace('reject')">{{ editing.tier ? 'kein Tier' : 'kein Gesicht' }}</button>
         <button type="button" class="px-2 text-neutral-500 hover:text-white" @click="editing = null">✕</button>
         <span v-if="faceError" class="pr-2 text-red-400">{{ faceError }}</span>
       </form>

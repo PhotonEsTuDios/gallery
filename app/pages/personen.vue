@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // Personen benennen (gallery#7): Gruppen aus der Gesichtserkennung (staubsauger#14).
 // Benennen (gallery#10): Gruppe anklicken -> Name -> falsche anklicken -> Speichern. Gleicher Name = zusammengeführt.
+// Tiere (gallery#18): dieselbe Seite mit ?art=tiere, Daten aus staubsauger#17 (photon-animals).
 interface Group { cluster: string; size: number; photos: number; person: string | null; samples: string[] }
 interface Named { person: string; clusters: string[]; size: number; photos: number; samples: string[] }
 interface Page { generated_at?: string; named: Named[]; groups: Group[]; total: number; next: number | null }
@@ -14,13 +15,23 @@ const loading = ref(false)
 const busy = reactive<Record<string, string>>({}) // cluster -> laufende Aktion
 const error = ref('')
 
-const crop = (key: string) => `/face/${key.replace(/^faces\//, '').replace(/\.jpg$/, '')}`
+const route = useRoute()
+const tiere = computed(() => route.query.art === 'tiere')
+const art = computed(() => (tiere.value ? { art: 'tiere' } : {}))
+const api = () => `/api/personen${tiere.value ? '?art=tiere' : ''}`
+// Wörter je Bereich, damit die Seite für beide gleich bleibt
+const wort = computed(() => tiere.value
+  ? { frage: 'Welches Tier ist das?', die: 'das Tier', viele: 'Tiere', leer: 'Noch keine Gruppen — die Tier-Erkennung gruppiert täglich um 06:15 UTC.' }
+  : { frage: 'Wer ist das?', die: 'die Person', viele: 'Gesichter', leer: 'Noch keine Gruppen — die Gesichtserkennung gruppiert täglich um 06:00 UTC.' })
+
+const cropSrc = (id: string) => `/face/${id}${tiere.value ? '?art=tiere' : ''}`
+const crop = (key: string) => cropSrc(key.replace(/^(faces|animals)\//, '').replace(/\.jpg$/, ''))
 
 async function load(reset = false) {
   if (loading.value || (!reset && next.value === null)) return
   loading.value = true
   try {
-    const p = await $fetch<Page>('/api/personen', { query: { offset: reset ? 0 : next.value } })
+    const p = await $fetch<Page>('/api/personen', { query: { offset: reset ? 0 : next.value, ...art.value } })
     named.value = p.named
     groups.value = reset ? p.groups : groups.value.concat(p.groups)
     total.value = p.total
@@ -40,12 +51,17 @@ onMounted(() => {
   window.addEventListener('keydown', onKey)
 })
 onUnmounted(() => window.removeEventListener('keydown', onKey))
+// Wechsel Personen <-> Tiere: Liste leeren und neu laden
+watch(tiere, () => {
+  named.value = []; groups.value = []; total.value = 0; next.value = 0; notice.value = ''; error.value = ''; loading.value = false
+  load(true)
+})
 
 async function act(cluster: string, label: string, actions: Record<string, unknown>[]) {
   busy[cluster] = label
   error.value = ''
   try {
-    await postSigned('/api/personen', { actions })
+    await postSigned(api(), { actions })
     return true
   } catch (e: any) {
     error.value = e?.data?.statusMessage || e?.statusMessage || 'Speichern fehlgeschlagen'
@@ -79,12 +95,12 @@ async function more() {
   if (!d || d.loading || d.next === null) return
   d.loading = true
   try {
-    const r = await $fetch<{ faces: Sample[]; next: number | null }>(`/api/personen/${d.group.cluster}`, { query: { offset: d.next } })
+    const r = await $fetch<{ faces: Sample[]; next: number | null }>(`/api/personen/${d.group.cluster}`, { query: { offset: d.next, ...art.value } })
     if (dlg.value !== d) return
     d.faces = d.faces.concat(r.faces)
     d.next = r.next
   } catch (e: any) {
-    d.error = e?.data?.statusMessage || 'Gesichter laden fehlgeschlagen'
+    d.error = e?.data?.statusMessage || `${wort.value.viele} laden fehlgeschlagen`
   } finally {
     d.loading = false
   }
@@ -109,7 +125,7 @@ async function saveDialog() {
   busy[g.cluster] = 'speichert…'
   d.error = ''
   try {
-    const r = await postSigned<{ results: any[] }>('/api/personen', { actions: [{ mode: 'confirm', cluster: g.cluster, person, wrong, shown }] })
+    const r = await postSigned<{ results: any[] }>(api(), { actions: [{ mode: 'confirm', cluster: g.cluster, person, wrong, shown }] })
     const res = r.results?.[0] ?? {}
     groups.value = groups.value.filter((x) => x.cluster !== g.cluster)
     total.value--
@@ -122,7 +138,7 @@ async function saveDialog() {
       notice.value = `✓ ${person} gespeichert — große Gruppe, wird im Hintergrund übernommen (ca. 1 Min.)`
     } else {
       const out = (res.removed || 0) + (res.auto_removed || 0)
-      notice.value = `✓ ${person}: ${res.faces} Gesichter auf ${res.photos} Fotos` + (out ? ` · ${res.removed} markierte + ${res.auto_removed} ähnliche entfernt` : '')
+      notice.value = `✓ ${person}: ${res.faces} ${wort.value.viele} auf ${res.photos} Fotos` + (out ? ` · ${res.removed} markierte + ${res.auto_removed} ähnliche entfernt` : '')
     }
     dlg.value = null
   } catch (e: any) {
@@ -139,7 +155,10 @@ const when = computed(() => (generatedAt.value ? new Date(generatedAt.value).toL
 <template>
   <div class="mx-auto max-w-7xl px-5 py-8">
     <div class="mb-6 flex flex-wrap items-baseline justify-between gap-2">
-      <h1 class="text-sm uppercase tracking-[0.2em] text-neutral-500">Personen</h1>
+      <h1 class="flex gap-4 text-sm uppercase tracking-[0.2em]" data-test="art">
+        <NuxtLink to="/personen" :class="tiere ? 'text-neutral-600 hover:text-neutral-300' : 'text-neutral-300'">Personen</NuxtLink>
+        <NuxtLink :to="{ path: '/personen', query: { art: 'tiere' } }" :class="tiere ? 'text-neutral-300' : 'text-neutral-600 hover:text-neutral-300'">Tiere</NuxtLink>
+      </h1>
       <span v-if="when" class="text-xs text-neutral-500">gruppiert {{ when }} · täglich neu</span>
     </div>
     <p v-if="error" class="mb-4 text-sm text-red-400">{{ error }}</p>
@@ -153,14 +172,14 @@ const when = computed(() => (generatedAt.value ? new Date(generatedAt.value).toL
           :key="n.person"
           class="group overflow-hidden rounded-xl border border-line transition hover:border-neutral-500"
         >
-          <NuxtLink :to="`/person/${encodeURIComponent(n.person)}`" class="grid grid-cols-2" title="Album-Vorschlag">
+          <NuxtLink :to="tiere ? { path: '/timeline', query: { t: n.person } } : `/person/${encodeURIComponent(n.person)}`" class="grid grid-cols-2" :title="tiere ? 'Timeline' : 'Album-Vorschlag'">
             <img v-for="s in n.samples.slice(0, 4)" :key="s" :src="crop(s)" alt="" loading="lazy" class="aspect-square w-full object-cover" />
           </NuxtLink>
           <div class="p-2">
             <div class="truncate text-sm font-medium">{{ n.person }}</div>
             <div class="flex justify-between text-xs text-neutral-500">
-              <NuxtLink :to="{ path: '/timeline', query: { p: n.person } }" class="hover:text-neutral-200">{{ n.photos }} Fotos · Timeline</NuxtLink>
-              <NuxtLink :to="`/person/${encodeURIComponent(n.person)}`" class="text-neutral-300 hover:text-white" data-test="person-album">Album →</NuxtLink>
+              <NuxtLink :to="{ path: '/timeline', query: tiere ? { t: n.person } : { p: n.person } }" class="hover:text-neutral-200">{{ n.photos }} Fotos · Timeline</NuxtLink>
+              <NuxtLink v-if="!tiere" :to="`/person/${encodeURIComponent(n.person)}`" class="text-neutral-300 hover:text-white" data-test="person-album">Album →</NuxtLink>
             </div>
           </div>
         </div>
@@ -170,13 +189,13 @@ const when = computed(() => (generatedAt.value ? new Date(generatedAt.value).toL
     <!-- Unbenannte Gruppen -->
     <section>
       <h2 class="mb-1 border-b border-line pb-2 text-lg font-medium">
-        Wer ist das? <span class="text-xs text-neutral-500">{{ total }} Gruppen, größte zuerst</span>
+        {{ wort.frage }} <span class="text-xs text-neutral-500">{{ total }} Gruppen, größte zuerst</span>
       </h2>
       <p class="mb-4 text-xs text-neutral-500">
-        Gruppe anklicken → Namen eintragen → wer <b>nicht</b> die Person ist anklicken → Speichern. Gleicher Name bei zwei Gruppen = zusammengeführt.
+        Gruppe anklicken → Namen eintragen → wer <b>nicht</b> {{ wort.die }} ist anklicken → Speichern. Gleicher Name bei zwei Gruppen = zusammengeführt.
       </p>
       <p v-if="notice" class="mb-4 rounded-md border border-emerald-700/60 bg-emerald-900/20 px-3 py-2 text-sm text-emerald-300" data-test="notice">{{ notice }}</p>
-      <p v-if="!loading && !groups.length && !named.length" class="text-sm text-neutral-500">Noch keine Gruppen — die Gesichtserkennung gruppiert täglich um 06:00 UTC.</p>
+      <p v-if="!loading && !groups.length && !named.length" class="text-sm text-neutral-500">{{ wort.leer }}</p>
 
       <datalist id="person-names"><option v-for="n in names" :key="n" :value="n" /></datalist>
       <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" data-test="groups">
@@ -185,9 +204,9 @@ const when = computed(() => (generatedAt.value ? new Date(generatedAt.value).toL
             <img v-for="s in g.samples.slice(0, 4)" :key="s" :src="crop(s)" alt="" loading="lazy" class="aspect-square w-full object-cover" />
           </button>
           <div class="space-y-2 p-2">
-            <div class="text-xs text-neutral-500">{{ g.photos }} Fotos · {{ g.size }} Gesichter</div>
+            <div class="text-xs text-neutral-500">{{ g.photos }} Fotos · {{ g.size }} {{ wort.viele }}</div>
             <div class="flex items-center justify-between text-xs">
-              <button class="rounded-full border border-line px-3 py-1 text-neutral-200 hover:border-neutral-400" data-test="benennen" @click="openDialog(g)">Wer ist das?</button>
+              <button class="rounded-full border border-line px-3 py-1 text-neutral-200 hover:border-neutral-400" data-test="benennen" @click="openDialog(g)">{{ wort.frage }}</button>
               <span v-if="busy[g.cluster]" class="text-neutral-500">{{ busy[g.cluster] }}</span>
               <button v-else class="text-neutral-500 hover:text-neutral-200" title="Fremde, Publikum: nicht mehr zeigen" @click="hideGroup(g)">Ausblenden</button>
             </div>
@@ -207,7 +226,7 @@ const when = computed(() => (generatedAt.value ? new Date(generatedAt.value).toL
         <div class="mx-auto max-w-6xl">
           <div class="sticky top-0 z-10 -mx-5 mb-4 space-y-3 bg-black/95 px-5 py-3">
             <div class="flex flex-wrap items-center gap-3">
-              <span class="text-xs text-neutral-500">1. Wer ist das?</span>
+              <span class="text-xs text-neutral-500">1. {{ wort.frage }}</span>
               <input
                 v-model="dlg.person"
                 data-test="dlg-name"
@@ -229,7 +248,7 @@ const when = computed(() => (generatedAt.value ? new Date(generatedAt.value).toL
               <button class="ml-auto text-xs text-neutral-400 hover:text-white" @click="closeDialog">✕ schließen</button>
             </div>
             <p class="text-xs text-neutral-400">
-              2. Anklicken, wer <b>nicht</b> {{ dlg.person.trim() || 'die Person' }} ist. Gezeigt: {{ dlg.faces.length }} von {{ dlg.group.size }}, unsichere zuerst. Ähnliche im Rest nimmt die Erkennung beim Speichern automatisch mit raus.
+              2. Anklicken, wer <b>nicht</b> {{ dlg.person.trim() || wort.die }} ist. Gezeigt: {{ dlg.faces.length }} von {{ dlg.group.size }}, unsichere zuerst. Ähnliche im Rest nimmt die Erkennung beim Speichern automatisch mit raus.
             </p>
             <p v-if="dlg.error" class="text-sm text-red-400" data-test="dlg-error">{{ dlg.error }}</p>
           </div>
@@ -242,7 +261,7 @@ const when = computed(() => (generatedAt.value ? new Date(generatedAt.value).toL
               :class="dlg.wrong.has(key(f)) ? 'border-red-500' : 'border-transparent hover:border-neutral-500'"
               @click="toggle(f)"
             >
-              <img :src="`/face/${f.crop}`" alt="" loading="lazy" class="aspect-square w-full object-cover" :class="dlg.wrong.has(key(f)) ? 'opacity-30' : ''" />
+              <img :src="cropSrc(f.crop)" alt="" loading="lazy" class="aspect-square w-full object-cover" :class="dlg.wrong.has(key(f)) ? 'opacity-30' : ''" />
               <span v-if="dlg.wrong.has(key(f))" class="absolute inset-0 flex items-center justify-center text-3xl font-bold text-red-500">✕</span>
             </button>
           </div>

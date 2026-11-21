@@ -4,10 +4,20 @@
 import { GetObjectCommand } from '@aws-sdk/client-s3'
 import { QueryCommand } from '@aws-sdk/lib-dynamodb'
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
+import type { H3Event } from 'h3'
 import { ddb, s3, streamToBuffer } from './aws'
 import { rebuildIndex } from './photos'
 
-export const SUMMARY_KEY = 'faces/clusters.json'
+// Tiere wie Personen (gallery#18): dieselben Bausteine, eigener Namensraum (staubsauger#17, Lambda photon-animals).
+// Jede Route nimmt ?art=tiere; ohne Angabe gilt wie bisher „personen“.
+export type Kind = 'personen' | 'tiere'
+export const PREFIX: Record<Kind, string> = { personen: 'faces', tiere: 'animals' }
+export const summaryKey = (kind: Kind = 'personen') => `${PREFIX[kind]}/clusters.json`
+export function kindOf(event: H3Event): Kind {
+  return getQuery(event).art === 'tiere' ? 'tiere' : 'personen'
+}
+
+export const SUMMARY_KEY = summaryKey()
 export const CROP_RE = /^[a-f0-9]{64}_\d{1,3}$/
 const NAME_RE = /^[^<>"\\/,]{0,60}$/
 
@@ -28,24 +38,29 @@ export interface Face {
   crop: string // id für /face/<id>
 }
 
-function cfg() {
+function cfg(kind: Kind = 'personen') {
   const c = useRuntimeConfig()
-  return { region: c.awsRegion, bucket: c.photosBucket, table: c.photosTable, faces: c.facesTable, fn: c.facesFunction }
+  const tiere = kind === 'tiere'
+  return {
+    region: c.awsRegion, bucket: c.photosBucket, table: c.photosTable,
+    faces: tiere ? c.animalsTable : c.facesTable, fn: tiere ? c.animalsFunction : c.facesFunction,
+  }
 }
 
 // ---- Übersicht (faces/clusters.json) ------------------------------------------------
-let summary: { at: number; data: { generated_at?: string; clusters: Cluster[] } } | null = null
-export async function getClusters(): Promise<{ generated_at?: string; clusters: Cluster[] }> {
-  if (summary && Date.now() - summary.at < 60_000) return summary.data
+type Summary = { generated_at?: string; clusters: Cluster[] }
+const summary: Partial<Record<Kind, { at: number; data: Summary }>> = {}
+export async function getClusters(kind: Kind = 'personen'): Promise<Summary> {
+  const hit = summary[kind]
+  if (hit && Date.now() - hit.at < 60_000) return hit.data
   const { region, bucket } = cfg()
+  let data: Summary = { clusters: [] } // noch nicht gruppiert
   try {
-    const res = await s3(region).send(new GetObjectCommand({ Bucket: bucket, Key: SUMMARY_KEY }))
-    const data = JSON.parse((await streamToBuffer(res.Body)).toString('utf8'))
-    summary = { at: Date.now(), data }
-  } catch {
-    summary = { at: Date.now(), data: { clusters: [] } } // noch nicht gruppiert
-  }
-  return summary.data
+    const res = await s3(region).send(new GetObjectCommand({ Bucket: bucket, Key: summaryKey(kind) }))
+    data = JSON.parse((await streamToBuffer(res.Body)).toString('utf8'))
+  } catch {}
+  summary[kind] = { at: Date.now(), data }
+  return data
 }
 
 /** Benannte Personen (Gruppen gleichen Namens zusammengefasst) + unbenannte Gruppen. */
@@ -68,7 +83,7 @@ export function splitClusters(clusters: Cluster[]) {
 }
 
 export function cropId(key: string): string {
-  return key.replace(/^faces\//, '').replace(/\.jpg$/, '')
+  return key.replace(/^(faces|animals)\//, '').replace(/\.jpg$/, '')
 }
 
 // ---- Gesichter lesen ------------------------------------------------------------------
@@ -93,17 +108,22 @@ function toFace(it: Record<string, any>): Face {
   }
 }
 
-export async function facesOfPhoto(sha: string): Promise<Face[]> {
+export async function facesOfPhoto(sha: string, kind: Kind = 'personen'): Promise<Face[]> {
+  // Tiere: solange photon-animals noch nicht eingerichtet ist (Tabelle/Recht fehlt), einfach keine Rahmen
+  if (kind === 'tiere') return facesOfPhotoIn(sha, kind).catch((e) => { console.warn('[tiere] keine Daten', e?.name); return [] })
+  return facesOfPhotoIn(sha, kind)
+}
+async function facesOfPhotoIn(sha: string, kind: Kind): Promise<Face[]> {
   const items = await queryAll({
-    TableName: cfg().faces, KeyConditionExpression: 'sha256 = :s', ExpressionAttributeValues: { ':s': sha },
+    TableName: cfg(kind).faces, KeyConditionExpression: 'sha256 = :s', ExpressionAttributeValues: { ':s': sha },
     ProjectionExpression: 'sha256, face, box, person, #c, crop, ignored', ExpressionAttributeNames: { '#c': 'cluster' },
   })
   return items.filter((it) => !it.ignored).map(toFace)
 }
 
-export async function facesOfCluster(cluster: string, max = 600): Promise<Face[]> {
+export async function facesOfCluster(cluster: string, max = 600, kind: Kind = 'personen'): Promise<Face[]> {
   const items = await queryAll({
-    TableName: cfg().faces, IndexName: 'cluster-index',
+    TableName: cfg(kind).faces, IndexName: 'cluster-index',
     KeyConditionExpression: '#c = :c', ExpressionAttributeNames: { '#c': 'cluster' }, ExpressionAttributeValues: { ':c': cluster },
   }, max)
   return items.filter((it) => !it.ignored).map((it) => toFace({ ...it, cluster }))
@@ -167,8 +187,8 @@ export function validateAction(body: any): FacesAction {
 // Die laufen asynchron; der Personen-Filter zieht spätestens mit dem nächsten Index-Neuaufbau (≤ 30 min) nach.
 const BIG = 1500
 
-async function invoke(action: FacesAction, background = false) {
-  const { region, fn } = cfg()
+async function invoke(action: FacesAction, background = false, kind: Kind = 'personen') {
+  const { region, fn } = cfg(kind)
   _lambda ??= new LambdaClient({ region })
   const res = await _lambda.send(new InvokeCommand({
     FunctionName: fn, Payload: Buffer.from(JSON.stringify(action)), InvocationType: background ? 'Event' : 'RequestResponse',
@@ -183,23 +203,23 @@ async function invoke(action: FacesAction, background = false) {
 }
 
 /** Mehrere Aktionen (z. B. 5 falsche Gesichter raus), danach EIN Index-Neuaufbau (~5 s). */
-export async function runFacesActions(actions: FacesAction[]) {
+export async function runFacesActions(actions: FacesAction[], kind: Kind = 'personen') {
   const { region, table, bucket } = cfg()
-  const sizes = new Map((await getClusters()).clusters.map((c) => [c.cluster, c.size]))
+  const sizes = new Map((await getClusters(kind)).clusters.map((c) => [c.cluster, c.size]))
   const isBig = (a: FacesAction) => 'cluster' in a && (sizes.get(a.cluster) ?? 0) > BIG
   const results: unknown[] = []
   const work = actions.filter((a) => a.mode !== 'reindex')
   for (let i = 0; i < work.length; i += 8) {
-    results.push(...(await Promise.all(work.slice(i, i + 8).map((a) => invoke(a, isBig(a))))))
+    results.push(...(await Promise.all(work.slice(i, i + 8).map((a) => invoke(a, isBig(a), kind)))))
   }
-  summary = null // Übersicht neu lesen
+  delete summary[kind] // Übersicht neu lesen
   if (actions.some((a) => !isBig(a) && a.mode !== 'not_person')) await rebuildIndex(region, table, bucket) // Personen-Filter sofort aktuell
   return results
 }
 
 /** Stichprobe zum Prüfen (gallery#10): Ausreißer zuerst, gerechnet in photon-faces (dort liegen die Vektoren). */
-export async function sampleCluster(cluster: string, offset = 0) {
-  const r = await invoke({ mode: 'sample', cluster, offset } as any)
+export async function sampleCluster(cluster: string, offset = 0, kind: Kind = 'personen') {
+  const r = await invoke({ mode: 'sample', cluster, offset } as any, false, kind)
   return {
     cluster, size: r.size as number, next: r.next as number | null,
     faces: (r.faces as any[]).map((f) => ({ sha: f.sha, face: f.face, sim: f.sim, crop: cropId(f.crop) })),

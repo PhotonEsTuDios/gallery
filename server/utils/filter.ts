@@ -3,6 +3,7 @@
 // URL-Parameter (gleich in jeder Ansicht, z. B. /timeline?p=Santi,Nepo&pm=zusammen&farbe=Blau):
 //   p        Personen, Komma-getrennt
 //   pm       zusammen (Standard: alle auf einem Foto) | oder (mindestens eine)
+//   t        Tiere (benannt wie Personen, gallery#18), Komma-getrennt -> alle auf einem Foto
 //   farbe    Farbfamilien (Hauptfarbe), Komma-getrennt -> oder
 //   jahr     Jahre (JJJJ), Komma-getrennt -> oder
 //   herkunft dropbox,timemachine,icloud,lokal -> oder
@@ -16,6 +17,7 @@ export const COLOR_FAMILIES = ['Rot', 'Orange', 'Braun', 'Gelb', 'Grün', 'Türk
 export interface Filter {
   persons: string[]
   personMode: 'and' | 'or'
+  animals: string[]
   colors: Set<string>
   years: Set<string>
   origins: Set<Origin>
@@ -24,6 +26,7 @@ export interface Filter {
 export interface Filterable {
   origins: Origin[]
   persons?: string[]
+  animals?: string[]
   colors?: string[]
 }
 
@@ -39,11 +42,12 @@ export function parseFilter(q: Record<string, unknown>): Filter | null {
   const f: Filter = {
     persons: list(q.p).filter((n) => NAME_RE.test(n)),
     personMode: String(q.pm || '') === 'oder' ? 'or' : 'and',
+    animals: list(q.t).filter((n) => NAME_RE.test(n)),
     colors: new Set(list(q.farbe).filter((c) => (COLOR_FAMILIES as readonly string[]).includes(c))),
     years: new Set(list(q.jahr).filter((y) => /^(19|20)\d{2}$/.test(y))),
     origins: new Set(list(q.herkunft).filter((o): o is Origin => (ORIGINS as readonly string[]).includes(o))),
   }
-  return f.persons.length || f.colors.size || f.years.size || f.origins.size ? f : null
+  return f.persons.length || f.animals.length || f.colors.size || f.years.size || f.origins.size ? f : null
 }
 
 /** Grobe Farbfamilie eines Hex-Werts ("nach Farbe"-Filter, Labels-Ansicht). */
@@ -86,15 +90,25 @@ export function applyFilter<T extends Filterable>(photos: T[], f: Filter | null,
       const hit = f.personMode === 'and' ? f.persons.every((n) => have.includes(n)) : f.persons.some((n) => have.includes(n))
       if (!hit) return false
     }
+    if (f.animals.length && !f.animals.every((n) => (p.animals ?? []).includes(n))) return false
     if (f.colors.size && !f.colors.has(colorFamily((p.colors ?? [])[0]))) return false
     if (f.years.size && !f.years.has((dateOf(p) || '').slice(0, 4))) return false
     return true
   })
 }
 
+function nameCounts(photos: Filterable[], field: 'persons' | 'animals'): { name: string; count: number }[] {
+  const m = new Map<string, number>()
+  for (const p of photos) for (const n of p[field] ?? []) m.set(n, (m.get(n) ?? 0) + 1)
+  return [...m].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+}
+
 /** Zähler je Person über eine (ggf. schon gefilterte) Menge — für die Chips. */
 export function personCounts(photos: Filterable[]): { name: string; count: number }[] {
-  const m = new Map<string, number>()
-  for (const p of photos) for (const n of p.persons ?? []) m.set(n, (m.get(n) ?? 0) + 1)
-  return [...m].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+  return nameCounts(photos, 'persons')
+}
+
+/** Dasselbe für Tiere (gallery#18). */
+export function animalCounts(photos: Filterable[]): { name: string; count: number }[] {
+  return nameCounts(photos, 'animals')
 }

@@ -28,6 +28,9 @@ export default defineNuxtConfig({
     photosTable: process.env.PHOTOS_TABLE || 'photonestudios-photos',
     facesTable: process.env.FACES_TABLE || 'photonestudios-faces',
     facesFunction: process.env.FACES_FUNCTION || 'photon-faces',
+    // Tiere wie Personen (gallery#18): eigener Namensraum aus staubsauger/animals_cloud
+    animalsTable: process.env.ANIMALS_TABLE || 'photonestudios-animals',
+    animalsFunction: process.env.ANIMALS_FUNCTION || 'photon-animals',
   },
 
   app: {

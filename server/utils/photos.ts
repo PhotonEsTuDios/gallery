@@ -19,7 +19,7 @@ export function originOf(source: string | undefined): Origin {
 }
 
 // ---- Gemeinsamer Filter (gallery#8) ------------------------------------------
-// Alle Ansichten lesen denselben Filter aus der URL (Personen, Farbe, Jahr, Herkunft), siehe filter.ts.
+// Alle Ansichten lesen denselben Filter aus der URL (Personen, Tiere, Farbe, Jahr, Herkunft), siehe filter.ts.
 export function filterFrom(event: H3Event): Filter | null {
   const f = parseFilter(getQuery(event))
   // gefilterte Antworten nie in CloudFront cachen
@@ -53,6 +53,8 @@ export interface Photo {
   // Personen aus der Gesichtserkennung (staubsauger#14, gallery#7)
   persons?: string[]
   face_count?: number // Gesichter auf dem Foto (photon-faces), für Personen-Alben (gallery#15)
+  // Benannte Tiere (staubsauger#17, gallery#18), eigenes Feld neben persons
+  animals?: string[]
 }
 
 export interface Album {
@@ -128,7 +130,7 @@ function albumYear(name: string): number {
 const TTL_MS = 60 * 1000
 const REBUILD_MS = 30 * 60 * 1000
 export const INDEX_KEY = 'index/gallery-photos.json.gz'
-const INDEX_VERSION = 4 // 4: face_count (gallery#15). hochzählen, wenn sich Photo/albumOf ändert -> erzwingt Neuaufbau
+const INDEX_VERSION = 5 // 5: animals (gallery#18). hochzählen, wenn sich Photo/albumOf ändert -> erzwingt Neuaufbau
 
 interface IndexFile { v: number; builtAt: number; photos: Photo[] }
 let cache: { at: number; builtAt: number; etag?: string; photos: Photo[] } | null = null
@@ -143,13 +145,17 @@ export async function getAllPhotos(region: string, table: string, bucket?: strin
 
 // Personen geändert (photon-faces schreibt faces/clusters.json nach jedem Benennen und nach dem
 // nächtlichen Gruppieren)? Dann ist der Index veraltet -> neu bauen (gallery#10, kein Browser-Timer nötig).
+// Dasselbe für Tiere (photon-animals, animals/clusters.json, gallery#18).
 async function peopleChangedAt(region: string, bucket: string): Promise<number> {
-  try {
-    const h = await s3(region).send(new HeadObjectCommand({ Bucket: bucket, Key: 'faces/clusters.json' }))
-    return h.LastModified?.getTime() ?? 0
-  } catch {
-    return 0
+  const at = async (Key: string) => {
+    try {
+      const h = await s3(region).send(new HeadObjectCommand({ Bucket: bucket, Key }))
+      return h.LastModified?.getTime() ?? 0
+    } catch {
+      return 0
+    }
   }
+  return Math.max(...(await Promise.all([at('faces/clusters.json'), at('animals/clusters.json')])))
 }
 
 async function loadIndex(region: string, table: string, bucket: string): Promise<Photo[]> {
@@ -205,7 +211,7 @@ async function scanPhotos(region: string, table: string): Promise<Photo[]> {
       new ScanCommand({
         TableName: table,
         ProjectionExpression:
-          'sha256, s3_key, original_filename, source_path, #b, uploaded_at, taken_at, quality_score, blurry, dominant_colors, gps_lat, gps_lon, camera_make, camera_model, #src, sources, persons, face_count',
+          'sha256, s3_key, original_filename, source_path, #b, uploaded_at, taken_at, quality_score, blurry, dominant_colors, gps_lat, gps_lon, camera_make, camera_model, #src, sources, persons, face_count, animals',
         ExpressionAttributeNames: { '#b': 'bytes', '#src': 'source' },
         ExclusiveStartKey,
       }),
@@ -238,6 +244,7 @@ async function scanPhotos(region: string, table: string): Promise<Photo[]> {
         origins,
         persons: it.persons ? [...it.persons].sort() : undefined,
         face_count: it.face_count !== undefined ? Number(it.face_count) : undefined,
+        animals: it.animals ? [...it.animals].sort() : undefined,
       })
     }
     ExclusiveStartKey = res.LastEvaluatedKey
