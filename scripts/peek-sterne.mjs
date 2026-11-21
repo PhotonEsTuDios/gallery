@@ -43,7 +43,9 @@ let im = await loaded('[data-test=named] img, [data-test=groups] img')
 ok('Seite Personen: Benannte + Gruppen mit Ausschnitten', im.n > 20 && im.ok > 20 && (await p.locator('[data-test=named] > div').count()) === ist.benannt, `${im.ok}/${im.n} Bilder, ${ist.benannt} benannt`)
 // Umschalter: beide Reiter gut sichtbar = heller Text oder helle Fläche, mit Rahmen drumherum
 const tabs = () => p.evaluate(() => {
-  const lum = (c) => { const m = c.match(/[\d.]+/g).map(Number); return m.length > 3 && m[3] === 0 ? -1 : (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255 }
+  // Helligkeit 0..1 über ein Canvas (Farben kommen als oklch); durchsichtig = -1
+  const cv = document.createElement('canvas'); cv.width = cv.height = 1; const cx = cv.getContext('2d', { willReadFrequently: true })
+  const lum = (c) => { cx.clearRect(0, 0, 1, 1); cx.fillStyle = c; cx.fillRect(0, 0, 1, 1); const [r, g, b, a] = cx.getImageData(0, 0, 1, 1).data; return a === 0 ? -1 : (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 }
   const box = document.querySelector('[data-test=art]')
   return { border: parseFloat(getComputedStyle(box).borderTopWidth), tabs: [...box.querySelectorAll('a')].map((a) => { const s = getComputedStyle(a); const r = a.getBoundingClientRect(); return { text: a.textContent.trim(), fg: lum(s.color), bg: lum(s.backgroundColor), w: Math.round(r.width), h: Math.round(r.height), current: a.getAttribute('aria-current') } }) }
 })
