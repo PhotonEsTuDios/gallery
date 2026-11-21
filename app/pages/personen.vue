@@ -30,17 +30,19 @@ const crop = (key: string) => cropSrc(key.replace(/^(faces|animals)\//, '').repl
 async function load(reset = false) {
   if (loading.value || (!reset && next.value === null)) return
   loading.value = true
+  const bereich = tiere.value // Antwort verwerfen, wenn inzwischen Personen <-> Tiere umgeschaltet wurde
   try {
     const p = await $fetch<Page>('/api/personen', { query: { offset: reset ? 0 : next.value, ...art.value } })
+    if (bereich !== tiere.value) return
     named.value = p.named
     groups.value = reset ? p.groups : groups.value.concat(p.groups)
     total.value = p.total
     next.value = p.next
     generatedAt.value = p.generated_at ?? ''
   } catch (e: any) {
-    error.value = e?.statusMessage || 'Laden fehlgeschlagen'
+    if (bereich === tiere.value) error.value = e?.statusMessage || 'Laden fehlgeschlagen'
   } finally {
-    loading.value = false
+    if (bereich === tiere.value) loading.value = false
   }
 }
 function onKey(e: KeyboardEvent) {
@@ -54,6 +56,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 // Wechsel Personen <-> Tiere: Liste leeren und neu laden
 watch(tiere, () => {
   named.value = []; groups.value = []; total.value = 0; next.value = 0; notice.value = ''; error.value = ''; loading.value = false
+  dlg.value = null
   load(true)
 })
 
