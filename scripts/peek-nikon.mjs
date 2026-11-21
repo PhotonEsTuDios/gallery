@@ -1,6 +1,6 @@
 import { chromium } from 'playwright'
 
-// Selbsttest Nikon-Seite: Kameras/Jahre/Kacheln zählen, Screenshot, Lightbox mit Säulen öffnen.
+// Selbsttest Nikon-Seite: Kameras/Jahre/Kacheln zählen, Screenshot, Lightbox öffnen.
 const PW = process.env.GALLERY_PASSWORD
 const OUT = process.env.OUT || '.'
 const BASE = process.env.BASE || 'http://localhost:3000'
@@ -27,8 +27,8 @@ console.log('Monatsgruppen:', await page.locator('section h2').count(), '| Kache
 await page.screenshot({ path: `${OUT}/pw-nikon.png` })
 
 await page.locator('section .grid > button').first().click()
-await page.waitForSelector('[data-test=pillars]')
+await page.waitForSelector('[data-test=lightbox-image]')
 await page.waitForTimeout(1500)
 await page.screenshot({ path: `${OUT}/pw-nikon-lightbox.png` })
-console.log('Lightbox mit Säulen: ok')
+console.log('Lightbox: ok')
 await b.close()

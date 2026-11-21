@@ -70,13 +70,6 @@ async function logout() {
             Personen
           </NuxtLink>
           <NuxtLink
-            to="/auswahl"
-            class="transition hover:text-neutral-200"
-            :class="route.path === '/auswahl' ? 'text-neutral-200' : 'text-neutral-500'"
-          >
-            Auswahl
-          </NuxtLink>
-          <NuxtLink
             to="/import"
             class="transition hover:text-neutral-200"
             :class="route.path === '/import' ? 'text-neutral-200' : 'text-neutral-500'"

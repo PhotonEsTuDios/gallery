@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Nur Bilder aus Danielas Nikon-Kameras – zum Auswählen fürs Portfolio (Säulen in der Lightbox).
+// Nur Bilder aus Danielas Nikon-Kameras.
 interface CameraPhoto {
   sha: string
   filename: string
@@ -37,13 +37,10 @@ async function loadAll() {
 onMounted(loadAll)
 watch(query, loadAll)
 const loadingMore = computed(() => !!data.value && data.value.length < total.value)
-const { picks, load } = usePortfolio()
-onMounted(() => load())
 
 const model = ref<string | null>(null) // null = alle Nikons
 const year = ref<string | null>(null)
 const hideBlurry = ref(true)
-const hidePicked = ref(false)
 
 const all = computed(() => data.value ?? [])
 const models = computed(() => {
@@ -74,8 +71,7 @@ const shown = computed(() =>
   byModel.value.filter(
     (p) =>
       (!year.value || p.taken_at.startsWith(year.value)) &&
-      !(hideBlurry.value && p.blurry) &&
-      !(hidePicked.value && picks.value[p.sha]),
+      !(hideBlurry.value && p.blurry),
   ),
 )
 
@@ -92,8 +88,6 @@ const groups = computed(() => {
   return out
 })
 
-const pillarLabel = (sha: string) => PILLAR_INFO.find((x) => x.key === picks.value[sha]?.pillar)?.label
-
 const lightboxList = ref<CameraPhoto[]>([])
 const openIndex = ref<number | null>(null)
 function open(i: number) {
@@ -102,7 +96,7 @@ function open(i: number) {
 }
 
 // Vorschaugröße XS…XL, gemeinsam mit allen Ansichten (gallery#14)
-const { cell, thumbW, gridStyle } = useDensity()
+const { thumbW, gridStyle } = useDensity()
 </script>
 
 <template>
@@ -151,8 +145,7 @@ const { cell, thumbW, gridStyle } = useDensity()
 
       <div class="mb-6 flex flex-wrap gap-4 text-xs text-neutral-400">
         <label class="flex cursor-pointer items-center gap-2"><input v-model="hideBlurry" type="checkbox" /> Unscharfe ausblenden</label>
-        <label class="flex cursor-pointer items-center gap-2"><input v-model="hidePicked" type="checkbox" /> Schon gewählte ausblenden</label>
-        <span class="text-neutral-500">{{ shown.length }} sichtbar · Bild öffnen, dann 1–4 für die Säule</span>
+        <span class="text-neutral-500">{{ shown.length }} sichtbar</span>
         <DensityToggle class="ml-auto" />
       </div>
 
@@ -171,12 +164,6 @@ const { cell, thumbW, gridStyle } = useDensity()
               loading="lazy"
               class="h-full w-full object-cover transition duration-300 group-hover:opacity-90"
             />
-            <span
-              v-if="pillarLabel(p.sha) && cell >= 78"
-              class="absolute left-1 top-1 rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-black"
-            >
-              {{ pillarLabel(p.sha) }}
-            </span>
           </button>
         </div>
       </section>

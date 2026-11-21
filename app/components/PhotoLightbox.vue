@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import type { Pillar } from '~/composables/usePortfolio'
-
 interface Photo {
   sha: string
   filename: string
@@ -44,14 +42,6 @@ function next() {
 function prev() {
   if (props.index === null || !props.photos.length) return
   emit('update:index', (props.index - 1 + props.photos.length) % props.photos.length)
-}
-
-// Portfolio-Auswahl: Säule per Klick oder Taste 1–4, 0 entfernt
-const { picks, error: pickError, load: loadPicks, toggle } = usePortfolio()
-const currentPick = computed(() => (current.value ? picks.value[current.value.sha]?.pillar ?? null : null))
-const currentInfo = computed(() => PILLAR_INFO.find((p) => p.key === currentPick.value) ?? null)
-function pick(pillar: Pillar | null) {
-  if (current.value) toggle(current.value, pillar)
 }
 
 // ---- Gesichter (gallery#9) -----------------------------------------------------
@@ -117,13 +107,8 @@ function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') close()
   else if (e.key === 'ArrowRight') next()
   else if (e.key === 'ArrowLeft') prev()
-  else if (e.key >= '1' && e.key <= '4') pick(PILLAR_INFO[Number(e.key) - 1].key)
-  else if (e.key === '0') pick(null)
 }
-onMounted(() => {
-  window.addEventListener('keydown', onKey)
-  loadPicks()
-})
+onMounted(() => window.addEventListener('keydown', onKey))
 onUnmounted(() => window.removeEventListener('keydown', onKey))
 </script>
 
@@ -226,24 +211,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <button type="button" class="px-2 text-neutral-500 hover:text-white" @click="editing = null">✕</button>
         <span v-if="faceError" class="pr-2 text-red-400">{{ faceError }}</span>
       </form>
-
-      <!-- Portfolio-Säulen -->
-      <div class="absolute bottom-5 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2">
-        <p v-if="pickError" class="text-xs text-red-400">{{ pickError }}</p>
-        <p v-else-if="currentInfo?.consent" class="text-xs text-amber-300/90">Vor dem Posten: Freigabe der Person einholen</p>
-        <div class="flex items-center gap-1 rounded-full border border-line bg-ink/80 p-1 backdrop-blur" data-test="pillars">
-          <button
-            v-for="(p, i) in PILLAR_INFO"
-            :key="p.key"
-            :title="`${p.hint} (Taste ${i + 1})`"
-            class="rounded-full px-3 py-1.5 text-xs transition"
-            :class="currentPick === p.key ? 'bg-neutral-100 text-black' : 'text-neutral-300 hover:bg-neutral-800'"
-            @click="pick(p.key)"
-          >
-            <span class="mr-1 text-neutral-500">{{ i + 1 }}</span>{{ p.label }}
-          </button>
-        </div>
-      </div>
 
       <a
         :href="isVideo ? (videoUrl || '#') : `/img/${current.sha}?dl=1`"

@@ -1,5 +1,5 @@
 // Gespeicherte Alben (gallery#15), z. B. aus Personen-Vorschlägen. Eine JSON-Datei
-// s3://<bucket>/albums/saved.json, Schreiben mit ETag-Bedingung wie beim Portfolio.
+// s3://<bucket>/albums/saved.json, Schreiben mit ETag-Bedingung.
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3'
 import type { H3Event } from 'h3'
 import { s3, streamToBuffer } from './aws'

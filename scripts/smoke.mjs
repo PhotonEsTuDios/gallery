@@ -26,7 +26,7 @@ const imgs = async () => {
   await p.waitForTimeout(2500)
   return p.evaluate(() => { const i = [...document.images].filter(x => x.getAttribute('src')); return { n: i.length, loaded: i.filter(x => x.complete && x.naturalWidth).length } })
 }
-for (const path of ['/', '/timeline', '/labels', '/map', '/auswahl', '/nikon', '/import']) {
+for (const path of ['/', '/timeline', '/labels', '/map', '/nikon', '/import']) {
   const r = await p.goto(BASE + path, { waitUntil: 'networkidle', timeout: 45000 }).catch(e => null)
   const st = r ? r.status() : 0
   const im = await imgs()

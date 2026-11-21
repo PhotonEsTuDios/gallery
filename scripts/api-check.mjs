@@ -73,7 +73,7 @@ async function grows(path) {
 
 const albums = await api('/api/albums')
 const months = await api('/api/timeline')
-for (const path of ['/api/me', '/api/herkunft', '/api/labels', '/api/portfolio', '/api/import']) await api(path)
+for (const path of ['/api/me', '/api/herkunft', '/api/labels', '/api/import']) await api(path)
 for (const path of ['/api/albums', '/api/timeline', '/api/labels', '/api/import']) await grows(path)
 await paged('/api/nikon', 'r')
 await paged('/api/map', 'pins', 'count')
